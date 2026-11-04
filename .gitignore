@@ -5,3 +5,15 @@ node_modules/
 build/
 data/postgres-dev/
 docker-compose.custom*.yml
+docker-compose.override*.yml
+
+# deployment-specific overlays; only the .example.yml files are tracked
+deploy/docker-compose.*.yml
+!deploy/docker-compose.*.example.yml
+
+# runtime state, if the deploy dir is used in place
+deploy/db/
+deploy/data/
+
+# hasura console exports; the tracked copy is deploy/hasura/metadata.json
+hasura_metadata_*.json
