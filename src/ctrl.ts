@@ -28,22 +28,33 @@ async function rebuildOutstandingTokens(max = 200) {
         .limit(max)
     ).filter(({ payload }) => payload.type === 'token');
 
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i];
+    const startedAt = Date.now();
+    let rebuilt = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const result of results) {
+      const tokenKey = `${result.payload.fa2_address}_${result.payload.token_id}`;
+
       try {
-        if (tokensWithErrors[`${result.payload.fa2_address}_${result.payload.token_id}`]) {
+        if (tokensWithErrors[tokenKey]) {
           // skip tokens that threw an error while rebuilding before
+          skipped++;
           continue;
         }
 
-        console.log(`rebuilding token ${i}`);
-
         await rebuild!(result.payload);
         await db('graphile_worker.jobs').where('id', result.id).del();
+        rebuilt++;
       } catch (err) {
-        tokensWithErrors[`${result.payload.fa2_address}_${result.payload.token_id}`] = true;
-        console.log('err', err);
+        tokensWithErrors[tokenKey] = true;
+        failed++;
+        console.log(`failed to rebuild token ${tokenKey}`, err);
       }
+    }
+
+    if (results.length) {
+      console.log(`rebuilt ${rebuilt} outstanding tokens in ${Date.now() - startedAt}ms (skipped: ${skipped}, failed: ${failed})`);
     }
   } catch (err) {
     console.log('failed to rebuild tokens', err);
