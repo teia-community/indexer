@@ -2,7 +2,7 @@ import uniqBy from 'lodash/uniqBy';
 import get from 'lodash/get';
 import isString from 'lodash/isString';
 import { Processor, MetadataEvent } from '../../../types';
-import { getWorkerUtils, getTaskName } from '../../../lib/utils';
+import { getWorkerUtils, getTaskName, sortedUniqueJobSpecs } from '../../../lib/utils';
 import * as metadataDao from '../../../lib/daos/metadata';
 
 const MetadataProcessor: Processor = {
@@ -26,13 +26,17 @@ const MetadataProcessor: Processor = {
     if (rows.length) {
       await metadataDao.add(rows);
 
-      for (const uri of notExistingUris) {
-        await workerUtils.addJob(
-          getTaskName('fetch-metadata'),
-          { metadata_uri: uri },
-          { jobKey: `resolve-metadata-${uri.substring(0, 400)}`, maxAttempts: 6 }
-        );
-      }
+      // one addJobs call per level instead of one addJob per uri
+      await workerUtils.addJobs(
+        sortedUniqueJobSpecs(
+          notExistingUris.map((uri) => ({
+            identifier: getTaskName('fetch-metadata'),
+            payload: { metadata_uri: uri },
+            jobKey: `resolve-metadata-${uri.substring(0, 400)}`,
+            maxAttempts: 6,
+          }))
+        )
+      );
     }
   },
 };

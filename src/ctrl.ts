@@ -1,67 +1,12 @@
 import './bootstrap';
 import { HubConnectionBuilder } from '@microsoft/signalr';
-import uniqBy from 'lodash/uniqBy';
 import config from './lib/config';
 import * as eventsDao from './lib/daos/events';
-import { getWorkerUtils } from './lib/utils';
-import { rebuild } from './tasks/rebuild/rebuild';
+import { getWorkerUtils, addRebuildTokenJobs } from './lib/utils';
 import logger from './lib/logger';
 import db from './lib/db';
 import { getTaskName } from './lib/utils';
 import { TokenEvent } from './types';
-
-let isRebuildingTokens = false;
-const tokensWithErrors: Record<string, boolean> = {};
-
-// TODO: solve this properly
-async function rebuildOutstandingTokens(max = 200) {
-  isRebuildingTokens = true;
-
-  try {
-    const results = (
-      await db
-        .select('*')
-        .from('graphile_worker.jobs')
-        .where('task_identifier', getTaskName('rebuild'))
-        .andWhere('attempts', '=', 0)
-        .orderBy('id', 'desc')
-        .limit(max)
-    ).filter(({ payload }) => payload.type === 'token');
-
-    const startedAt = Date.now();
-    let rebuilt = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    for (const result of results) {
-      const tokenKey = `${result.payload.fa2_address}_${result.payload.token_id}`;
-
-      try {
-        if (tokensWithErrors[tokenKey]) {
-          // skip tokens that threw an error while rebuilding before
-          skipped++;
-          continue;
-        }
-
-        await rebuild!(result.payload);
-        await db('graphile_worker.jobs').where('id', result.id).del();
-        rebuilt++;
-      } catch (err) {
-        tokensWithErrors[tokenKey] = true;
-        failed++;
-        console.log(`failed to rebuild token ${tokenKey}`, err);
-      }
-    }
-
-    if (results.length) {
-      console.log(`rebuilt ${rebuilt} outstanding tokens in ${Date.now() - startedAt}ms (skipped: ${skipped}, failed: ${failed})`);
-    }
-  } catch (err) {
-    console.log('failed to rebuild tokens', err);
-  }
-
-  isRebuildingTokens = false;
-}
 
 async function handleTimedoutOffersAndListings(max = 50) {
   try {
@@ -85,20 +30,7 @@ async function handleTimedoutOffersAndListings(max = 50) {
       .orderBy('end_time', 'desc')
       .limit(max);
 
-    const tokens = uniqBy([...offerResults, ...listingResults], ({ fa2_address, token_id }) => `${fa2_address}-${token_id}`) as Array<{
-      fa2_address: string;
-      token_id: string;
-    }>;
-
-    const workerUtils = await getWorkerUtils();
-
-    for (const token of tokens) {
-      await workerUtils.addJob(
-        getTaskName('rebuild'),
-        { type: 'token', fa2_address: token.fa2_address, token_id: token.token_id },
-        { jobKey: `rebuild-token-${token.fa2_address}-${token.token_id}`, maxAttempts: 2 }
-      );
-    }
+    await addRebuildTokenJobs([...offerResults, ...listingResults]);
   } catch (err) {
     console.log('failed to handle timed out offers and listings', err);
   }
@@ -106,33 +38,50 @@ async function handleTimedoutOffersAndListings(max = 50) {
 
 let isEnqueueingLevels = false;
 
-async function countPendingLevels() {
-  const [{ count }] = await db('graphile_worker.jobs')
-    .where('task_identifier', getTaskName('event-producer'))
-    .andWhereRaw('attempts < max_attempts')
-    .count('* as count');
+// the level keys tell which levels are still waiting; the jobs view has no payload since graphile-worker 0.13
+async function getPendingLevels() {
+  const {
+    rows: [{ count, lowest, highest }],
+  } = await db.raw(
+    `select count(*)::int as count, min(substring(key from 13)::int) as lowest, max(substring(key from 13)::int) as highest
+     from graphile_worker.jobs
+     where task_identifier = ? and attempts < max_attempts and key like 'index-level-%'`,
+    [getTaskName('event-producer')]
+  );
 
-  return parseInt(count as string, 10);
+  return { count: count as number, lowest: lowest as number | null, highest: highest as number | null };
 }
 
-// one statement instead of one addJob per level: every add_job commit sends a NOTIFY, and those all
+// one addJobs call instead of one addJob per level: every call commits with a NOTIFY, and those all
 // serialize on postgres's global notify lock, so enqueueing level by level is slow under load.
 async function enqueueLevels(from: number, to: number) {
-  await db.raw(
-    `select graphile_worker.add_job(
-       identifier => ?,
-       payload => json_build_object('filters', json_build_object('level', level)),
-       job_key => 'index-level-' || level
-     )
-     from generate_series(?::int, ?::int) as level`,
-    [getTaskName('event-producer'), from, to]
+  const workerUtils = await getWorkerUtils();
+
+  await workerUtils.addJobs(
+    Array.from({ length: to - from + 1 }, (_, i) => ({
+      identifier: getTaskName('event-producer'),
+      payload: { filters: { level: from + i } },
+      jobKey: `index-level-${from + i}`,
+    }))
   );
+}
+
+// read through the last_level() function, which the status bot polls via hasura. failing to record it
+// must not stop indexing, so errors are only logged.
+async function recordIndexedLevel(level: number) {
+  try {
+    await db('indexer_state').insert({ id: 1, level, updated_at: new Date() }).onConflict('id').merge();
+  } catch (err) {
+    logger.error(`failed to record indexed level ${level}`, err);
+  }
 }
 
 export async function run() {
   const connection = new HubConnectionBuilder().withUrl(`${config.tzktApiUrl}/ws`).build();
   const workerUtils = await getWorkerUtils();
-  let lastBlock = (await eventsDao.getLatestLevel()) || config.startBlock - 1;
+  // continue after the levels still queued from before a restart; re-adding a level that a worker is
+  // running makes graphile queue a second copy, and both copies then run at the same time
+  let lastBlock = Math.max((await eventsDao.getLatestLevel()) || config.startBlock - 1, (await getPendingLevels()).highest || 0);
 
   async function init() {
     await connection.start();
@@ -153,8 +102,13 @@ export async function run() {
       const startBlock = lastBlock + 1;
 
       try {
+        const pending = await getPendingLevels();
+
+        // everything below the lowest waiting level is done; with nothing waiting, all enqueued levels are
+        await recordIndexedLevel(pending.lowest !== null ? pending.lowest - 1 : lastBlock);
+
         // backpressure: only top the queue up, so it cannot run far ahead of the workers
-        const room = Math.max(0, config.maxPendingLevels - (await countPendingLevels()));
+        const room = Math.max(0, config.maxPendingLevels - pending.count);
         const max = Math.min(lastBlock + Math.min(config.maxBlocksPerIteration, room), msg.state);
 
         if (max >= startBlock) {
@@ -181,25 +135,13 @@ export async function run() {
       const lastValidBlock = msg.state;
       logger.info(`reorg: revert to level ${lastValidBlock}`);
       const invalidEvents = await db.select('*').from('events').where('level', '>', lastValidBlock);
-      const uniqInvalidTokenEvents: Array<TokenEvent> = uniqBy(invalidEvents, (event) => `${event.fa2_address}-${event.token_id}`);
       await db('events').where('level', '>', lastValidBlock).del();
 
       // TODO: handle case of other data models than tokens
-      for (const event of uniqInvalidTokenEvents) {
-        await workerUtils.addJob(
-          getTaskName('rebuild'),
-          { type: 'token', fa2_address: event.fa2_address, token_id: event.token_id },
-          { jobKey: `rebuild-token-${event.fa2_address}-${event.token_id}`, maxAttempts: 2 }
-        );
-      }
+      await addRebuildTokenJobs((invalidEvents as Array<TokenEvent>).filter(({ fa2_address, token_id }) => fa2_address && token_id));
 
       // rewind so the reverted levels get re-indexed
       lastBlock = Math.min(lastBlock, lastValidBlock);
-    }
-
-    if (!isRebuildingTokens) {
-      // temp workaround to the problem that indexer is sometimes lagging...
-      rebuildOutstandingTokens(200);
     }
   });
 

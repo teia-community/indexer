@@ -1,6 +1,7 @@
 import '../../bootstrap';
 import groupBy from 'lodash/groupBy';
 import uniqBy from 'lodash/uniqBy';
+import sortBy from 'lodash/sortBy';
 import uniq from 'lodash/uniq';
 import chunk from 'lodash/chunk';
 import keyBy from 'lodash/keyBy';
@@ -24,7 +25,7 @@ import {
   TransactionHandler,
   OriginationHandler,
 } from '../../types';
-import { transactionMatchesPattern, getBlockQuotes, getTransactions, getOriginations, getTaskName } from '../../lib/utils';
+import { transactionMatchesPattern, getBlockQuotes, getTransactions, getOriginations, getTaskName, getWorkerPreset } from '../../lib/utils';
 import * as eventsDao from '../../lib/daos/events';
 import logger from '../../lib/logger';
 import config from '../../lib/config';
@@ -271,10 +272,14 @@ export async function produceEvents(payload: EventProducerTaskPayload) {
   await addQuotesToEvents(events);
 
   const tokenEvents = events.filter((event) => 'fa2_address' in event && 'token_id' in event) as Array<TokenEvent>;
-  const tokens = uniqBy(tokenEvents, ({ fa2_address, token_id }) => `${fa2_address}-${token_id}`).map((event) => ({
-    fa2_address: event.fa2_address,
-    token_id: event.token_id,
-  })) as Array<Token>;
+  // sorted, so that workers inserting overlapping tokens lock them in the same order and cannot deadlock
+  const tokens = sortBy(
+    uniqBy(tokenEvents, ({ fa2_address, token_id }) => `${fa2_address}-${token_id}`).map((event) => ({
+      fa2_address: event.fa2_address,
+      token_id: event.token_id,
+    })),
+    ['fa2_address', 'token_id']
+  ) as Array<Token>;
 
   await db.transaction(async (trx) => {
     // TODO: remove this logic here. instead, the rebuild-token should take care of it
@@ -307,6 +312,7 @@ const task: Task = {
   spawnWorkers: async () => {
     await run({
       connectionString: dbConfig.connection,
+      preset: getWorkerPreset(),
       concurrency: config.eventProducerConcurrency,
       noHandleSignals: false,
       pollInterval: config.workerPollInterval,

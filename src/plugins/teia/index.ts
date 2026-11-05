@@ -25,7 +25,7 @@ import TeiaSplitContractOriginationHandler, {
   TEIA_SPLIT_CONTRACT_ORIGINATION,
   TeiaSplitContractOriginationEvent,
 } from './handlers/teia_split_contract_origination';
-import { getWorkerUtils, getTaskName } from '../../lib/utils';
+import { getWorkerUtils, getTaskName, addRebuildTokenJobs, getWorkerPreset } from '../../lib/utils';
 import logger from '../../lib/logger';
 import { cleanUri } from '../../lib/schemas';
 import { createPreviewImageUri, extractCIDsFromMetadata } from './utils';
@@ -189,18 +189,11 @@ onRebuild(async (type, payload) => {
     await trx('teia_shareholders').insert(shareholders).transacting(trx);
   });
 
-  const workerUtils = await getWorkerUtils();
   const tokens = await db('tokens').select('*').where('artist_address', '=', payload.contract_address);
 
   // rebuild any token that was created by the split contract
   if (tokens && tokens.length) {
-    for (const token of tokens) {
-      await workerUtils.addJob(
-        getTaskName('rebuild'),
-        { type: 'token', fa2_address: token.fa2_address, token_id: token.token_id },
-        { jobKey: `rebuild-token-${token.fa2_address}-${token.token_id}`, maxAttempts: 2 }
-      );
-    }
+    await addRebuildTokenJobs(tokens);
   }
 });
 
@@ -352,6 +345,7 @@ const warmupThumbnailTask: Task = {
   spawnWorkers: async () => {
     await run({
       connectionString: dbConfig.connection,
+      preset: getWorkerPreset(),
       concurrency: 2,
       noHandleSignals: false,
       pollInterval: config.workerPollInterval,
