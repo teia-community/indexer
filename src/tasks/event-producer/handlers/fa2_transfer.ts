@@ -4,7 +4,7 @@ import { array, assert, object, Describe, string, is } from 'superstruct';
 import { TezosAddress, ContractAddress, IsoDateString, PositiveInteger, PgBigInt } from '../../../lib/validators';
 import { TransactionHandler, TokenEvent } from '../../../types';
 import logger from '../../../lib/logger';
-import { createEventId } from '../../../lib/utils';
+import { createEventId, isIndexedContract } from '../../../lib/utils';
 import { tokenEventFields, fromAddressField, toAddressField, amountField } from '../event-fields-meta';
 
 export const EVENT_TYPE_FA2_TRANSFER = 'FA2_TRANSFER';
@@ -94,7 +94,10 @@ const Fa2TransferHandler: TransactionHandler<Fa2TransferEvent> = {
 
           events.push(event);
         } catch (err) {
-          logger.error(`handler "${EVENT_TYPE_FA2_TRANSFER}" failed to process transfer: ${(err as Error).message}`);
+          // generic handler: it sees every FA2 contract, so stay quiet about contracts this instance does not index
+          if (isIndexedContract(fa2Address)) {
+            logger.error(`handler "${EVENT_TYPE_FA2_TRANSFER}" failed to process transfer: ${(err as Error).message}`);
+          }
         }
       }
     }

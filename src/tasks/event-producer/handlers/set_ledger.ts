@@ -6,7 +6,7 @@ import { assert, object, Describe, string, is, boolean } from 'superstruct';
 import { TezosAddress, ContractAddress, IsoDateString, PositiveInteger, PgBigInt } from '../../../lib/validators';
 import { TokenStorageSchema } from '../../../lib/schemas';
 import { TransactionHandler, TokenEvent, BigmapDiffContent, BigmapDiffKey, LedgerTypeMultiAsset, LedgerTypeNftAsset } from '../../../types';
-import { createEventId, filterDiffs } from '../../../lib/utils';
+import { createEventId, filterDiffs, isIndexedContract } from '../../../lib/utils';
 import logger from '../../../lib/logger';
 import { tokenEventFields, ledgerTypeField, holderAddressField, amountField, isMintField } from '../event-fields-meta';
 
@@ -179,7 +179,10 @@ const SetLedgerHandler: TransactionHandler<SetLedgerEvent> = {
 
           throw new Error('unsupported ledger entry');
         } catch (err) {
-          logger.error(`handler "${EVENT_TYPE_SET_LEDGER}" failed to process event: ${(err as Error).message}`);
+          // generic handler: it sees every FA2 contract, so stay quiet about contracts this instance does not index
+          if (isIndexedContract(fa2Address)) {
+            logger.error(`handler "${EVENT_TYPE_SET_LEDGER}" failed to process event: ${(err as Error).message}`);
+          }
           return false;
         }
       })

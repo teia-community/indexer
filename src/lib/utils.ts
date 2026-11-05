@@ -44,6 +44,18 @@ export async function getWorkerUtils() {
   return await workerUtilsPromise;
 }
 
+const ignoredContractAddresses = new Set(config.ignoredContractAddresses);
+
+// whether events for tokens of this contract are kept: only the allowed contracts when
+// ALLOWED_FA2_CONTRACT_ADDRESS is set, otherwise every contract that is not ignored
+export function isIndexedContract(fa2Address: string) {
+  if (config.allowedContractAddresses) {
+    return config.allowedContractAddresses.includes(fa2Address);
+  }
+
+  return !ignoredContractAddresses.has(fa2Address);
+}
+
 // shared graphile-worker settings for the worker processes' run() calls
 export function getWorkerPreset(): GraphileConfig.Preset {
   return { worker: { localQueue: { size: config.workerLocalQueueSize } } };
