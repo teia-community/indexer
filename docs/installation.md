@@ -1,87 +1,43 @@
 # Installation
 
-If you want to run an instance of the indexer, first make sure to have **Node.js** in version 17 or higher, as well as **docker** installed. Pull the latest code from the main branch on GitHub (we'll soon be starting to version releases).
+## Running an instance
+
+Instances run from the published images with docker compose. Everything needed to
+set one up — the compose file, a sample `.env`, the hasura metadata, restoring from
+a backup and upgrading — is in [`deploy/`](../deploy/README.md).
+
+## Running the indexer from source
+
+For development you can run the indexer straight from the repository, against a
+local postgres. This needs **Node.js** 22 or later and **docker**.
 
 ```bash
-git clone git@github.com:teztok/indexer.git
-```
-
-## Running the indexer in dev/local mode
-
-Install the Node.js dependencies by running:
-
-```bash
+git clone git@github.com:teia-community/indexer.git
+cd indexer
 npm install
-```
-
-Create a `.env` file by making a copy of `.env.sample` and modifying it to your needs.
-
-```bash
 cp .env.sample .env
 ```
 
-Start Postgres and Hasura by running:
+Edit `.env`: at least `TZKT_API` and `IPFS_GATEWAY`. The database settings in
+`.env.sample` match this throwaway postgres:
 
 ```bash
-docker-compose up -d
+docker run -d --name teztok-dev-db -p 6666:5432 \
+  -e POSTGRES_USER=teztok -e POSTGRES_PASSWORD=teztok -e POSTGRES_DB=teztok \
+  postgres:18
 ```
 
-Now run this command to create the database schema:
+Create the schema and the teia plugin's tables, then start the indexer:
 
 ```bash
 npm run init:db
-```
-
-To start the indexer run:
-
-```bash
+node build/scripts/create-plugin-tables.js teia
 npm start
 ```
 
-It will start indexing from block 1365000 (end of February 2021).
-
-## Build and run the indexer through docker-compose:
-
-Create a `.env.prod` file by making a copy of `.env.sample` and modifying it to your needs.
-
-```bash
-cp .env.sample .env.prod
-```
-
-Now create a custom docker-compose file by copying `docker-compose.prod.yml` to `docker-compose.custom.yml` and modifying it to your needs.
-
-```bash
-cp docker-compose.prod.yml docker-compose.custom.yml
-```
-
-It would take a very long time to index everything from scratch, which is why we strongly recommend downloading and importing a recent database dump from https://backups.teztok.com/daily/. This dump also contains the Hasura configuration and data from tzprofiles.
-
-Here is an example of how such an SQL dump can be imported into a docker container running Postgres.
-
-```bash
-# Start Postgres
-docker-compose -f docker-compose.custom.yml up -d teztok_database
-
-# Import a recent dump (can take quite some time)
-gunzip < teztok-20220520-000000.sql.gz | docker exec -i teztok_database psql -U teztok -d teztok
-
-# Stop Postgres
-docker-compose -f docker-compose.custom.yml down
-```
-
-Now build the docker image:
-
-```bash
-docker-compose -f docker-compose.custom.yml build
-```
-
-And then start the indexer:
-
-```bash
-docker-compose -f docker-compose.custom.yml up
-```
-
-It's recommended to download and import an SQL dump from our backup server every once in a while in order to get fixes. This way you also don't need to bother with re-indexing.
+It starts indexing at block 1365000 (end of February 2021). A full index takes a
+long time; for anything beyond development, restore a backup as described in
+[`deploy/README.md`](../deploy/README.md) instead.
 
 ## Navigation
 
