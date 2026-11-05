@@ -1,7 +1,9 @@
 name: build image
 
-# Changes that only touch documentation neither run the tests nor publish an
-# image. Tag pushes are never filtered by paths, so a release always builds.
+# A push to main that only touches documentation publishes no image. Tag
+# pushes are never filtered by paths, so a release always builds. Pull requests
+# always run the tests: main requires the "test" check, and a pull request that
+# skipped it could never be merged.
 on:
   push:
     branches:
@@ -12,9 +14,6 @@ on:
       - '**/*.md'
       - 'docs/**'
   pull_request:
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
   workflow_dispatch:
 
 # A new push to a pull request cancels the run still going for its previous
