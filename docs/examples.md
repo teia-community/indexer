@@ -1,6 +1,6 @@
 # Examples
 
-These are a couple of common GraphQL queries. Try them out [here](https://graphiql.teztok.com/).
+These are a couple of common GraphQL queries. Try them out against https://teztok.teia.art/v1/graphql with any GraphQL client, such as GraphiQL or Altair.
 
 ---
 
