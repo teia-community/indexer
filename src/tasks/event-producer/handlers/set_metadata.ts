@@ -5,7 +5,7 @@ import { ContractAddress, IsoDateString, MetadataUri, PositiveInteger, PgBigInt 
 import { TokenStorageSchema } from '../../../lib/schemas';
 import logger from '../../../lib/logger';
 import { TransactionHandler, TokenEvent } from '../../../types';
-import { createEventId, filterDiffs } from '../../../lib/utils';
+import { createEventId, filterDiffs, isIndexedContract } from '../../../lib/utils';
 import { normalizeMetadataIpfsUri, decodeTokenInfoBytes } from '../../../lib/utils';
 import { tokenEventFields, metadataUriField, metadataField } from '../event-fields-meta';
 
@@ -155,7 +155,10 @@ const SetMetadataHandler: TransactionHandler<SetMetadataEvent> = {
 
           return event;
         } catch (err) {
-          logger.error(`handler "${EVENT_TYPE_SET_METADATA}" failed to process metadata: ${(err as Error).message}`);
+          // generic handler: it sees every FA2 contract, so stay quiet about contracts this instance does not index
+          if (isIndexedContract(fa2Address)) {
+            logger.error(`handler "${EVENT_TYPE_SET_METADATA}" failed to process metadata: ${(err as Error).message}`);
+          }
           return false;
         }
       })

@@ -25,7 +25,7 @@ import {
   TransactionHandler,
   OriginationHandler,
 } from '../../types';
-import { transactionMatchesPattern, getBlockQuotes, getTransactions, getOriginations, getTaskName, getWorkerPreset } from '../../lib/utils';
+import { transactionMatchesPattern, getBlockQuotes, getTransactions, getOriginations, getTaskName, getWorkerPreset, isIndexedContract } from '../../lib/utils';
 import * as eventsDao from '../../lib/daos/events';
 import logger from '../../lib/logger';
 import config from '../../lib/config';
@@ -159,11 +159,6 @@ export function originationsToEvents(originations: Originations = [], handlers: 
   return events;
 }
 
-const ignoredContractAddressesObj: Record<string, boolean> = config.ignoredContractAddresses.reduce(
-  (lookup, address) => ({ [address]: true, ...lookup }),
-  {}
-);
-
 export async function processEvents(events: Array<AnyEvent>) {
   for (const processor of processors) {
     const acceptedEvents = events.filter((event) => processor.accept(event));
@@ -247,12 +242,7 @@ export async function produceEvents(payload: EventProducerTaskPayload) {
       return true;
     }
 
-    if (config.allowedContractAddresses && Array.isArray(config.allowedContractAddresses)) {
-      return (config.allowedContractAddresses as Array<string>).includes((event as TokenEvent).fa2_address);
-    }
-
-    // TODO: generalize this?
-    return !((event as TokenEvent).fa2_address in ignoredContractAddressesObj);
+    return isIndexedContract((event as TokenEvent).fa2_address);
   });
 
   if (!payload.overwriteEvents) {

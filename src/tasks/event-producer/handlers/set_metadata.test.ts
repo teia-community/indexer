@@ -1,4 +1,6 @@
 import SetMetadataHandler from './set_metadata';
+import logger from '../../../lib/logger';
+import config from '../../../lib/config';
 import { transactionsToEvents } from '../event-producer';
 import { Transactions } from '../../../types';
 
@@ -931,4 +933,50 @@ test('decodes a metadata uri stored as a packed michelson string', async () => {
 
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({ fa2_address: 'KT1Xphnv7A1sUgRwZsecmAGFWm7WNxJz76ax', token_id: '886', metadata_uri: 'ipfs://QmYvpPCXCsxd62F59odfdfMT7AA8xXMgyyT59qYfZcAxeY/166' });
+});
+
+test('logs an invalid metadata uri only for contracts this instance indexes', () => {
+  const sectorJ = Buffer.from('sector.j').toString('hex');
+  const mint = (fa2Address: string): Transactions => [
+    {
+      id: 1,
+      level: 2239611,
+      timestamp: '2022-03-21T12:00:00Z',
+      block: 'BLockHash',
+      hash: 'opHash',
+      counter: 1,
+      sender: { address: 'tz1SenderAddress' },
+      target: { address: fa2Address },
+      amount: 0,
+      parameter: { entrypoint: 'mint', value: {} },
+      status: 'applied',
+      hasInternals: false,
+      initiator: null,
+      nonce: null,
+      storage: { ledger: 1, token_metadata: 2 },
+      diffs: [
+        {
+          bigmap: 2,
+          path: 'token_metadata',
+          action: 'add_key',
+          content: { hash: 'exprHash', key: '11444', value: { token_id: '11444', token_info: { '': sectorJ } } },
+        },
+      ],
+    },
+  ];
+  const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+  const allowed = config.allowedContractAddresses;
+
+  try {
+    config.allowedContractAddresses = ['KT1RJ6PbjHpwc3M5rw5s2Nbmefwbuwbdxton'];
+
+    expect(transactionsToEvents(mint('KT1MxDwChiDwd6WBVs24g1NjERUoK622ZEFp'), [SetMetadataHandler])).toStrictEqual([]);
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    expect(transactionsToEvents(mint('KT1RJ6PbjHpwc3M5rw5s2Nbmefwbuwbdxton'), [SetMetadataHandler])).toStrictEqual([]);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  } finally {
+    config.allowedContractAddresses = allowed;
+    errorSpy.mockRestore();
+  }
 });
