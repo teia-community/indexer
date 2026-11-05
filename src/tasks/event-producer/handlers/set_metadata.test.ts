@@ -885,3 +885,50 @@ test('creates SET_METADATA events', async () => {
     },
   ]);
 });
+
+test('decodes a metadata uri stored as a packed michelson string', async () => {
+  const transactions: Transactions = [
+    {
+      id: 129646738800640,
+      level: 1944844,
+      timestamp: '2021-12-14T15:00:26Z',
+      block: 'BLTUv8sGU2MgxkFL532pVP2gn5z1jKPUC6H6iTJNbfD5BQ4fjuB',
+      hash: 'ooFG3RyL5T9MA46ARTXRDg9w5kUoMXu9GBwPViUQNjqCWJpaBz3',
+      counter: 19162940,
+      sender: { address: 'KT1DtDPSLfkbQvT3PJw3c3viHQv7qSFjj2GL' },
+      target: { address: 'KT1Xphnv7A1sUgRwZsecmAGFWm7WNxJz76ax' },
+      amount: 0,
+      parameter: {
+        entrypoint: 'mint',
+        value: {
+          amount: '1',
+          address: 'tz1akYbNA27ReWN78x1Aw5W5yy34dcas5iHb',
+          token_id: '886',
+          token_info: { '': '050100000039697066733a2f2f516d5976705043584373786436324635396f646664664d543741413878584d6779795435397159665a63417865592f313636' },
+        },
+      },
+      status: 'applied',
+      hasInternals: false,
+      initiator: { address: 'tz1akYbNA27ReWN78x1Aw5W5yy34dcas5iHb' },
+      nonce: 2,
+      storage: { ledger: 23775, token_metadata: 23779 },
+      diffs: [
+        {
+          bigmap: 23779,
+          path: 'token_metadata',
+          action: 'add_key',
+          content: {
+            hash: 'expruPynvQKYeUDSENLmvSJevAhfK27exSMuvsTkhb8a6xejSnsejs',
+            key: '886',
+            value: { token_id: '886', token_info: { '': '050100000039697066733a2f2f516d5976705043584373786436324635396f646664664d543741413878584d6779795435397159665a63417865592f313636' } },
+          },
+        },
+      ],
+    },
+  ];
+
+  const events = transactionsToEvents(transactions, [SetMetadataHandler]);
+
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ fa2_address: 'KT1Xphnv7A1sUgRwZsecmAGFWm7WNxJz76ax', token_id: '886', metadata_uri: 'ipfs://QmYvpPCXCsxd62F59odfdfMT7AA8xXMgyyT59qYfZcAxeY/166' });
+});

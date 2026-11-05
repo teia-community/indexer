@@ -1,4 +1,4 @@
-import { splitsToRoyaltyShares } from './utils';
+import { splitsToRoyaltyShares, decodeTokenInfoBytes } from './utils';
 
 test('transforms splits into shares', async () => {
   const royalties = '100';
@@ -69,4 +69,16 @@ test('transforms splits into shares, odd numbers #2', async () => {
       tz1T2kiV5nN2socKzCoVeL96yENeasR3rALT: '62500',
     },
   });
+});
+
+test('decodeTokenInfoBytes unpacks michelson strings and leaves raw bytes alone', () => {
+  const uri = 'ipfs://QmYvpPCXCsxd62F59odfdfMT7AA8xXMgyyT59qYfZcAxeY/166';
+  const raw = Buffer.from(uri).toString('hex');
+  const packed = '0501' + uri.length.toString(16).padStart(8, '0') + raw;
+
+  expect(decodeTokenInfoBytes(packed)).toBe(uri);
+  expect(decodeTokenInfoBytes(raw)).toBe(uri);
+  // a length that does not match the rest is not a packed string
+  expect(decodeTokenInfoBytes('050100000001' + raw)).toBe(Buffer.from('050100000001' + raw, 'hex').toString());
+  expect(decodeTokenInfoBytes('')).toBe('');
 });

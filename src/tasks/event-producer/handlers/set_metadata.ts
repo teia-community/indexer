@@ -6,7 +6,7 @@ import { TokenStorageSchema } from '../../../lib/schemas';
 import logger from '../../../lib/logger';
 import { TransactionHandler, TokenEvent } from '../../../types';
 import { createEventId, filterDiffs } from '../../../lib/utils';
-import { normalizeMetadataIpfsUri } from '../../../lib/utils';
+import { normalizeMetadataIpfsUri, decodeTokenInfoBytes } from '../../../lib/utils';
 import { tokenEventFields, metadataUriField, metadataField } from '../event-fields-meta';
 
 export const EVENT_TYPE_SET_METADATA = 'SET_METADATA';
@@ -114,7 +114,7 @@ const SetMetadataHandler: TransactionHandler<SetMetadataEvent> = {
           let metadataUri;
 
           if (is(diff.content.value, TokenMetadataDiffOffchainSchema)) {
-            metadataUri = normalizeMetadataIpfsUri(Buffer.from(get(diff, 'content.value.token_info.'), 'hex').toString());
+            metadataUri = normalizeMetadataIpfsUri(decodeTokenInfoBytes(get(diff, 'content.value.token_info.')));
 
             if (metadataUri.startsWith('tezos-storage')) {
               // TODO: add support for tokens that use tezos-storage (e.g. manchester united token tokens)
@@ -122,9 +122,7 @@ const SetMetadataHandler: TransactionHandler<SetMetadataEvent> = {
             }
           } else {
             for (const [key, val] of Object.entries(get(diff, 'content.value.token_info'))) {
-              const str = Buffer.from(val as string, 'hex')
-                .toString()
-                .replace(/\0/g, '');
+              const str = decodeTokenInfoBytes(val as string).replace(/\0/g, '');
 
               try {
                 metadata[key] = JSON.parse(str);
