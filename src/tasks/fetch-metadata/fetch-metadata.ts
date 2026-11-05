@@ -35,12 +35,75 @@ function getIpfsGateways() {
   return process.env.IPFS_GATEWAY?.split(',').map((ipfsGateway) => ipfsGateway.trim());
 }
 
+function normalizeGateway(ipfsGateway: string) {
+  return ipfsGateway.trim().replace(/\/+$/, '');
+}
+
+// gateways that hold a complete archive: a 404 from one of them means the content is gone, so the
+// remaining gateways are not tried. without this, lost content holds a worker for every gateway's
+// timeout on every attempt.
+function getIpfsArchiveGateways() {
+  return (process.env.IPFS_ARCHIVE_GATEWAY || '').split(',').map(normalizeGateway).filter(Boolean);
+}
+
 function getOnchfsGateway() {
   return process.env.ONCHFS_GATEWAY ? process.env.ONCHFS_GATEWAY.trim() : null;
 }
 
 export async function downloadMetadataFromIpfs(ipfsCid: string, ipfsGateway: string) {
   return downloadMetadata(`${ipfsGateway}${ipfsGateway?.endsWith('/') ? '' : '/'}${ipfsCid}`);
+}
+
+export class MetadataNotFoundError extends Error {}
+
+export async function downloadMetadataFromIpfsGateways(ipfsCid: string, ipfsGateways: Array<string>, archiveGateways: Array<string> = []) {
+  if (!ipfsGateways.length) {
+    throw new Error('missing ipfs gateways');
+  }
+
+  for (let i = 0; ; i++) {
+    const ipfsGateway = ipfsGateways[i];
+
+    try {
+      return await downloadMetadataFromIpfs(ipfsCid, ipfsGateway);
+    } catch (err) {
+      if (archiveGateways.includes(normalizeGateway(ipfsGateway)) && (err as { response?: { status?: number } }).response?.status === 404) {
+        throw new MetadataNotFoundError(`${ipfsCid} is not on archive gateway ${ipfsGateway}`);
+      }
+
+      if (i === ipfsGateways.length - 1) {
+        throw err;
+      }
+    }
+  }
+}
+
+// asks another teztok instance for metadata that no longer downloads. content that was only pinned on
+// services that later dropped it often survives there, stored back when it still resolved.
+export async function fetchMetadataFromFallback(metadataUri: string, endpoint = process.env.METADATA_FALLBACK_GRAPHQL) {
+  if (!endpoint) {
+    return null;
+  }
+
+  try {
+    const { data } = await axios.post(
+      endpoint,
+      {
+        query: `query ($uri: String!) { token_metadata(where: {uri: {_eq: $uri}, status: {_eq: "processed"}}) { data } }`,
+        variables: { uri: metadataUri },
+      },
+      { timeout: config.fetchMetadataTimeout }
+    );
+
+    if (data.errors) {
+      throw new Error(data.errors.map(({ message }: { message: string }) => message).join(', '));
+    }
+
+    return data.data?.token_metadata?.[0]?.data ?? null;
+  } catch (err) {
+    logger.warn(`failed to query the metadata fallback for ${metadataUri}: ${(err as Error).message}`);
+    return null;
+  }
 }
 
 export function validateMetadata(metadata: MetadataBase) {
@@ -64,43 +127,48 @@ export async function processMetadata(payload: FetchMetadataTaskPayload, helpers
     let metadataUriLowerCased = metadataUri.toLowerCase();
     let metadata;
 
-    if (metadataUriLowerCased.startsWith('ipfs://')) {
-      const ipfsHash = metadataUri.substr(7);
-
-      if (!ipfsGateways) {
-        throw new Error('missing ipfs gateways');
-      }
-
-      for (let i = 0; i < ipfsGateways?.length; i++) {
-        const ipfsGateway = ipfsGateways[i];
-
-        try {
-          metadata = await downloadMetadataFromIpfs(ipfsHash, ipfsGateway);
-          break;
-        } catch (err) {
-          if (i === ipfsGateways.length - 1) {
-            throw err;
-          }
+    try {
+      if (metadataUriLowerCased.startsWith('ipfs://')) {
+        if (!ipfsGateways) {
+          throw new Error('missing ipfs gateways');
         }
+
+        metadata = await downloadMetadataFromIpfsGateways(metadataUri.substr(7), ipfsGateways, getIpfsArchiveGateways());
+      } else if (metadataUriLowerCased.startsWith('onchfs://')) {
+        const onchfsGateway = getOnchfsGateway();
+
+        if (!onchfsGateway) {
+          throw new Error('missing onchfs gateway');
+        }
+
+        const onchfsHash = metadataUri.substr(9);
+        const metadataUrl = `${onchfsGateway}${onchfsGateway?.endsWith('/') ? '' : '/'}${onchfsHash}`;
+
+        metadata = await downloadMetadata(metadataUrl);
+      } else if (metadataUriLowerCased.startsWith('http://') || metadataUriLowerCased.startsWith('https://')) {
+        // not lowercased: paths are case sensitive, and a lowercased cid points at nothing
+        metadata = await downloadMetadata(metadataUri);
+      } else {
+        // unsupported format
+        await metadataDao.update(metadataUri, 'error');
+        logger.error(`unsupported metadata uri: ${metadataUri}`);
+        return;
       }
-    } else if (metadataUriLowerCased.startsWith('onchfs://')) {
-      const onchfsGateway = getOnchfsGateway();
+    } catch (err) {
+      const recovered = await fetchMetadataFromFallback(metadataUri);
 
-      if (!onchfsGateway) {
-        throw new Error('missing onchfs gateway');
+      if (recovered === null) {
+        if (err instanceof MetadataNotFoundError) {
+          await metadataDao.update(metadataUri, 'error');
+          logger.error(`metadata not found: ${err.message}`, { metadata_uri: metadataUri });
+          return;
+        }
+
+        throw err;
       }
 
-      const onchfsHash = metadataUri.substr(9);
-      const metadataUrl = `${onchfsGateway}${onchfsGateway?.endsWith('/') ? '' : '/'}${onchfsHash}`;
-
-      metadata = await downloadMetadata(metadataUrl);
-    } else if (metadataUriLowerCased.startsWith('http://') || metadataUriLowerCased.startsWith('https://')) {
-      metadata = await downloadMetadata(metadataUriLowerCased);
-    } else {
-      // unsupported format
-      await metadataDao.update(metadataUri, 'error');
-      logger.error(`unsupported metadata uri: ${metadataUri}`);
-      return;
+      logger.info(`recovered metadata from the fallback after the download failed: ${(err as Error).message}`, { metadata_uri: metadataUri });
+      metadata = recovered;
     }
 
     try {
