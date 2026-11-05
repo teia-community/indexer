@@ -5,6 +5,8 @@ export const HEN_CONTRACT_MARKETPLACE_V2 = 'KT1HbQepzV1nVGg8QVznG7z4RcHseD5kwqBn
 export const TEIA_CONTRACT_MARKETPLACE = 'KT1PHubm9HtyQEJ4BBpMTVomq6mhbfNZ9z5w';
 
 export const OBJKT_CONTRACT_MARKETPLACE = 'KT1FvqJwEDWb1Gwc55Jd1jjTHRVWbYKUUpyq';
+// objkt.com's first offers contract, for Hic et Nunc OBJKTs only
+export const OBJKT_CONTRACT_OFFERS_PRE = 'KT1Dno3sQZwR5wUCWxzaohwuJwG3gX1VWj1Z';
 export const OBJKT_CONTRACT_MARKETPLACE_V2 = 'KT1WvzYHCNBvDSdwafTHv7nJ1dWmZ8GCYuuC';
 export const OBJKT_CONTRACT_MINTING_FACTORY = 'KT1Aq4wWmVanpQhq4TTfjZXB5AjFpx15iQMM';
 
