@@ -82,7 +82,9 @@ const ObjktBuyDutchAuctionHandlerV2: TransactionHandler<ObjktBuyDutchAuctionV2Ev
     const auctionId = get(transaction, 'parameter.value.auction_id');
     const price = get(transaction, 'parameter.value.amount');
     const buyerAddress = get(transaction, 'sender.address');
-    const diff = findDiff(transaction.diffs!, 103265, 'auctions', ['remove_key'], auctionId);
+    // a buy takes one edition: the contract updates the auction while editions remain and removes it
+    // with the last one. both diffs hold the auction's details.
+    const diff = findDiff(transaction.diffs!, 103265, 'auctions', ['update_key', 'remove_key'], auctionId);
     const sellerAddress = get(diff, 'content.value.creator');
     const fa2Address = get(diff, 'content.value.token.address');
     const tokenId = get(diff, 'content.value.token.token_id');
@@ -90,7 +92,8 @@ const ObjktBuyDutchAuctionHandlerV2: TransactionHandler<ObjktBuyDutchAuctionV2Ev
     const endTime = get(diff, 'content.value.end_time');
     const startPrice = get(diff, 'content.value.start_price');
     const endPrice = get(diff, 'content.value.end_price');
-    const amount = get(diff, 'content.value.editions');
+    // editions is what remains after an update, not what was bought; the removed value always shows 1
+    const amount = '1';
     const currency = extractObjktCurrency(get(diff, 'content.value.currency'));
     const id = createEventId(EVENT_TYPE_OBJKT_BUY_DUTCH_AUCTION_V2, transaction);
 
