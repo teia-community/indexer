@@ -187,6 +187,31 @@ docker compose --profile init run --rm db_init
 docker compose up -d
 ```
 
+### Upgrading from graphile-worker 0.12
+
+The release that moves to graphile-worker 0.17 rebuilds the job queue tables,
+and `graphile_worker.jobs` becomes a read-only view without the payload. Two
+extra steps on top of the migration procedure above:
+
+- graphile-worker refuses to migrate while any job is locked, and workers that
+  were stopped mid-job leave their locks behind. Release them after stopping
+  the workers and before `db_init`.
+- `last_level()` and the tracked table behind it change, so reapply the hasura
+  metadata afterwards.
+
+```sh
+docker compose stop teztok_ctrl teztok_event-producer teztok_fetch-metadata \
+  teztok_rebuild-token teztok_warmup_thumbnailcache
+docker compose exec teztok_database sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "update graphile_worker.jobs set locked_at = null, locked_by = null where locked_at is not null"'
+docker compose --profile init run --rm db_init
+docker compose --profile init run --rm hasura_init
+docker compose up -d
+```
+
+There is no way back to 0.12 short of restoring a backup taken before the
+upgrade.
+
 ## Rolling back
 
 Set `INDEXER_TAG` back to the previous tag, then `pull` and `up -d`. Worth

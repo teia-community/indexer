@@ -2,7 +2,7 @@ import '../bootstrap';
 import { produceEvents } from '../tasks/event-producer/event-producer';
 import { rebuild } from '../tasks/rebuild/rebuild';
 import { processMetadata } from '../tasks/fetch-metadata/fetch-metadata';
-import { getTaskName } from '../lib/utils';
+import { getTaskName, getWorkerUtils } from '../lib/utils';
 import db from '../lib/db';
 
 const tasks: Record<string, (payload: any) => {}> = {
@@ -18,22 +18,23 @@ async function run() {
   }
 
   const count = process.argv[3] ? parseInt(process.argv[3], 10) : 1000;
+  // the public graphile_worker.jobs view has no payload, so read it from graphile's own table
   const results = await db
-    .select('id')
-    .from('graphile_worker.jobs')
-    .where('task_identifier', getTaskName(taskId))
-    .orderBy('id', process.argv[4] || 'asc')
+    .select('jobs.id', 'jobs.payload')
+    .from('graphile_worker._private_jobs as jobs')
+    .join('graphile_worker._private_tasks as tasks', 'tasks.id', 'jobs.task_id')
+    .where('tasks.identifier', getTaskName(taskId))
+    .orderBy('jobs.id', process.argv[4] || 'asc')
     .limit(count);
+  const workerUtils = await getWorkerUtils();
 
   for (let i = 0; i < results.length; i++) {
-    const result = results[i];
+    const job = results[i];
     console.log(`processing ${i}`);
     console.time(`task-${i}`);
     try {
-      const job = await db.select('*').from('graphile_worker.jobs').where('id', result.id).first();
-
       await tasks[taskId]!(job.payload);
-      await db('graphile_worker.jobs').where('id', job.id).del();
+      await workerUtils.completeJobs([job.id]);
     } catch (err) {
       console.log('err', err);
     }

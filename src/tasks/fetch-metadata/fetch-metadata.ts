@@ -2,7 +2,7 @@ import '../../bootstrap';
 import { run, JobHelpers } from 'graphile-worker';
 import dbConfig from '../../knexfile';
 import { Task, MetadataBase } from '../../types';
-import { getWorkerUtils, getTaskName } from '../../lib/utils';
+import { getTaskName, addRebuildTokenJobs, getWorkerPreset } from '../../lib/utils';
 import logger from '../../lib/logger';
 import axios from 'axios';
 import * as metadataDao from '../../lib/daos/metadata';
@@ -48,7 +48,6 @@ export function validateMetadata(metadata: MetadataBase) {
 
 export async function processMetadata(payload: FetchMetadataTaskPayload, helpers?: JobHelpers) {
   let metadataUri = payload.metadata_uri;
-  const workerUtils = await getWorkerUtils();
   const ipfsGateways = getIpfsGateways();
 
   try {
@@ -113,13 +112,7 @@ export async function processMetadata(payload: FetchMetadataTaskPayload, helpers
     const tokens = await tokensDao.getByField('metadata_uri', metadataUri);
 
     if (tokens && tokens.length) {
-      for (const token of tokens) {
-        await workerUtils.addJob(
-          getTaskName('rebuild'),
-          { type: 'token', fa2_address: token.fa2_address, token_id: token.token_id },
-          { jobKey: `rebuild-token-${token.fa2_address}-${token.token_id}`, maxAttempts: 2 }
-        );
-      }
+      await addRebuildTokenJobs(tokens);
     }
   } catch (err) {
     const errMessage = (err as Error).message;
@@ -145,6 +138,7 @@ const task: Task = {
   spawnWorkers: async () => {
     await run({
       connectionString: dbConfig.connection,
+      preset: getWorkerPreset(),
       concurrency: config.fetchMetadataConcurrency,
       noHandleSignals: false,
       pollInterval: config.workerPollInterval,

@@ -2,7 +2,7 @@ import '../../bootstrap';
 import { run } from 'graphile-worker';
 import dbConfig from '../../knexfile';
 import config from '../../lib/config';
-import { getTaskName } from '../../lib/utils';
+import { getTaskName, getWorkerPreset } from '../../lib/utils';
 import { Task } from '../../types';
 import { rebuildToken, RebuildTokenTaskPayload } from './rebuild-token';
 import { triggerRebuild } from '../../plugins/plugins';
@@ -25,6 +25,7 @@ const task: Task = {
   spawnWorkers: async () => {
     await run({
       connectionString: dbConfig.connection,
+      preset: getWorkerPreset(),
       concurrency: config.rebuildConcurrency,
       noHandleSignals: false,
       pollInterval: config.rebuildPollInterval || config.workerPollInterval,

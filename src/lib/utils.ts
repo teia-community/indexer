@@ -1,9 +1,11 @@
 import got from 'got';
 import { makeWorkerUtils, WorkerUtils } from 'graphile-worker';
 import uniqBy from 'lodash/uniqBy';
+import sortBy from 'lodash/sortBy';
 import get from 'lodash/get';
 import { metrohash128 } from 'metrohash';
 import dbConfig from '../knexfile';
+import db from './db';
 import config from './config';
 import {
   RoyaltyShares,
@@ -40,6 +42,63 @@ export async function getWorkerUtils() {
   }
 
   return await workerUtilsPromise;
+}
+
+// shared graphile-worker settings for the worker processes' run() calls
+export function getWorkerPreset(): GraphileConfig.Preset {
+  return { worker: { localQueue: { size: config.workerLocalQueueSize } } };
+}
+
+// addJobs locks every existing job it replaces, in the order given. Concurrent calls that share keys
+// deadlock unless they all lock in the same order, so sort by key. It also rejects repeated keys.
+export function sortedUniqueJobSpecs<T extends { jobKey?: string }>(specs: Array<T>): Array<T> {
+  return sortBy(uniqBy(specs, 'jobKey'), 'jobKey');
+}
+
+// one addJobs call instead of one addJob per token: every call commits with a NOTIFY, and those all
+// serialize on postgres's global notify lock, so adding jobs one by one is slow under load.
+export async function addRebuildTokenJobs(tokens: Array<{ fa2_address: string; token_id: string }>) {
+  const specs = sortedUniqueJobSpecs(
+    tokens.map(({ fa2_address, token_id }) => ({
+      identifier: getTaskName('rebuild'),
+      payload: { type: 'token', fa2_address, token_id },
+      jobKey: `rebuild-token-${fa2_address}-${token_id}`,
+      maxAttempts: 2,
+    }))
+  );
+
+  if (!specs.length) {
+    return;
+  }
+
+  // a rebuild job that has not started yet will read the token's events when it runs, including the
+  // ones committed before this call, so re-adding it changes nothing. it would only lock the job row,
+  // and concurrent workers adding the same popular tokens then wait on and deadlock over those locks.
+  const { rows: waiting } = await db.raw(
+    `select key from graphile_worker.jobs where key = any(?) and locked_at is null and attempts < max_attempts`,
+    [specs.map(({ jobKey }) => jobKey)]
+  );
+  const waitingKeys = new Set(waiting.map(({ key }: { key: string }) => key));
+  const newSpecs = specs.filter(({ jobKey }) => !waitingKeys.has(jobKey));
+
+  if (!newSpecs.length) {
+    return;
+  }
+
+  const workerUtils = await getWorkerUtils();
+
+  // add_jobs locks rows in two passes (running jobs first, then the rest), so sorting cannot rule
+  // deadlocks out entirely when calls overlap; postgres aborts one side, which can simply retry
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await workerUtils.addJobs(newSpecs);
+      return;
+    } catch (err) {
+      if ((err as { code?: string }).code !== '40P01' || attempt >= 3) {
+        throw err;
+      }
+    }
+  }
 }
 
 function isMatchingDiff(

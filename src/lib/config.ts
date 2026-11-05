@@ -12,6 +12,9 @@ const defaultConfig = {
   maxBlocksPerIteration: process.env.MAX_BLOCKS_PER_ITERATION ? parseInt(process.env.MAX_BLOCKS_PER_ITERATION, 10) : 1000,
   // ctrl stops enqueueing levels while this many event-producer jobs are waiting
   maxPendingLevels: process.env.MAX_PENDING_LEVELS ? parseInt(process.env.MAX_PENDING_LEVELS, 10) : 5000,
+  // how many jobs each worker process locks and fetches per query; above 1 this cuts job lookups, which
+  // dominate database time when the queue is large. off by default.
+  workerLocalQueueSize: process.env.WORKER_LOCAL_QUEUE_SIZE ? parseInt(process.env.WORKER_LOCAL_QUEUE_SIZE, 10) : -1,
   tzktApiUrl: process.env.TZKT_API || 'https://api.mainnet.tzkt.io/v1',
   fetchMetadataTimeout: process.env.FETCH_METADATA_TIMEOUT ? parseInt(process.env.FETCH_METADATA_TIMEOUT, 10) : 40000,
   metadataMaxFilesize: 1024 * 60, // 60kb
