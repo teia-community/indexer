@@ -294,6 +294,19 @@ export function royaltiesToRoyaltyShares(receiverAddress: string, totalRoyalties
   };
 }
 
+// token_info values are usually raw bytes, but some contracts store a michelson PACKed string instead:
+// 0x05 0x01, a 4-byte big-endian length, then the string. decoded as raw bytes, that prefix ends up in
+// front of the uri and breaks it.
+export function decodeTokenInfoBytes(hex: string) {
+  const bytes = Buffer.from(hex, 'hex');
+
+  if (bytes.length >= 6 && bytes[0] === 0x05 && bytes[1] === 0x01 && bytes.readUInt32BE(2) === bytes.length - 6) {
+    return bytes.subarray(6).toString();
+  }
+
+  return bytes.toString();
+}
+
 export function normalizeMetadataIpfsUri(metadataUri: string) {
   let newMetadataUri = metadataUri;
 
