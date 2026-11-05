@@ -17,12 +17,18 @@ interface FetchMetadataTaskPayload {
 }
 
 async function downloadMetadata(url: string) {
-  const { data } = await axios.get(url, {
-    timeout: config.fetchMetadataTimeout,
-    maxContentLength: config.metadataMaxFilesize,
-  });
+  try {
+    const { data } = await axios.get(url, {
+      timeout: config.fetchMetadataTimeout,
+      maxContentLength: config.metadataMaxFilesize,
+    });
 
-  return data;
+    return data;
+  } catch (err) {
+    // the job error only carries the message (e.g. a 504), not which url or gateway failed
+    logger.warn(`failed to download metadata from ${url}: ${(err as Error).message}`);
+    throw err;
+  }
 }
 
 function getIpfsGateways() {
