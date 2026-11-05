@@ -1,3 +1,4 @@
+import { Knex } from 'knex';
 import difference from 'lodash/difference';
 import db from '../db';
 
@@ -27,6 +28,6 @@ export async function getNotExistingUris(uris: Array<string>): Promise<Array<str
   return difference(uris, existingUris);
 }
 
-export async function getByUri(uri: string) {
-  return db(TABLE).select('*').where('uri', '=', uri).first();
+export async function getByUri(uri: string, conn: Knex = db) {
+  return conn(TABLE).select('*').where('uri', '=', uri).first();
 }

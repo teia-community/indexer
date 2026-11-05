@@ -12,7 +12,7 @@ import snakeCase from 'lodash/snakeCase';
 import { is } from 'superstruct';
 import db from '../../lib/db';
 import config from '../../lib/config';
-import { isTezLikeCurrency } from '../../lib/utils';
+import { isTezLikeCurrency, lockToken } from '../../lib/utils';
 import {
   Platform,
   Metadata,
@@ -1777,78 +1777,88 @@ export function compileToken(
 export async function rebuildToken(payload: RebuildTokenTaskPayload) {
   const fa2Address = payload.fa2_address;
   const tokenId = payload.token_id;
-  const events = await eventsDao.getTokenEvents(fa2Address, tokenId);
-  const latestSetMetadataEvent = findLast(events, ({ type }) => type === 'SET_METADATA');
-  let metadataRow = null;
-  let metadata = null;
-  let status = 'unprocessed';
 
-  if (latestSetMetadataEvent) {
-    if (latestSetMetadataEvent.metadata_uri) {
-      metadataRow = await metadataDao.getByUri(latestSetMetadataEvent.metadata_uri);
-      metadata = metadataRow && metadataRow.data ? metadataRow.data : null;
-      status = metadataRow ? metadataRow.status : 'unprocessed';
-    } else if (latestSetMetadataEvent.metadata) {
-      metadata = latestSetMetadataEvent.metadata;
-      status = 'processed';
-    }
-  }
+  // the events are read inside the locked transaction too: otherwise a slower job could still write
+  // what it compiled from older events over the result of a newer one
+  const { events, metadata, token, listings, holders, tags, offers, royaltyReceivers } = await db.transaction(async (trx) => {
+    await lockToken(trx, fa2Address, tokenId);
 
-  const contractOriginationEvent = await db
-    .select('*')
-    .from('events')
-    .where('type', '=', CONTRACT_ORIGINATION)
-    .andWhere('contract_address', '=', fa2Address)
-    .first();
+    const events = await eventsDao.getTokenEvents(fa2Address, tokenId, trx);
+    const latestSetMetadataEvent = findLast(events, ({ type }) => type === 'SET_METADATA');
+    let metadataRow = null;
+    let metadata = null;
+    let status = 'unprocessed';
 
-  const { token, listings, holders, tags, offers, royaltyReceivers } = compileToken(
-    fa2Address,
-    tokenId,
-    events,
-    status,
-    metadata,
-    contractOriginationEvent
-  );
-
-  if ([FX_CONTRACT_FA2, FX_CONTRACT_FA2_V3, FX_CONTRACT_FA2_V4].includes(token.fa2_address) && isString(token.fx_issuer_id)) {
-    // add the displayUri and the thumbnailUri of the the fxhash collection to the token
-    try {
-      const fxMintIssuerEvent = await db
-        .select('*')
-        .from('events')
-        .whereIn('type', ['FX_MINT_ISSUER', 'FX_MINT_ISSUER_V2', 'FX_MINT_ISSUER_V3', 'FX_MINT_ISSUER_V4'])
-        .andWhere('issuer_id', '=', token.fx_issuer_id)
-        .first();
-
-      if (fxMintIssuerEvent && fxMintIssuerEvent.metadata_uri) {
-        const metadata = await db.select('*').from('token_metadata').where('uri', '=', fxMintIssuerEvent.metadata_uri).first();
-
-        if (get(metadata, 'data.name')) {
-          token.fx_collection_name = get(metadata, 'data.name');
-        }
-
-        if (get(metadata, 'data.description')) {
-          token.fx_collection_description = get(metadata, 'data.description');
-        }
-
-        if (get(metadata, 'data.displayUri')) {
-          token.fx_collection_display_uri = cleanUri(get(metadata, 'data.displayUri'));
-        }
-
-        if (get(metadata, 'data.thumbnailUri')) {
-          token.fx_collection_thumbnail_uri = cleanUri(get(metadata, 'data.thumbnailUri'));
-        }
-
-        if (get(fxMintIssuerEvent, 'editions')) {
-          token.fx_collection_editions = get(fxMintIssuerEvent, 'editions');
-        }
+    if (latestSetMetadataEvent) {
+      if (latestSetMetadataEvent.metadata_uri) {
+        metadataRow = await metadataDao.getByUri(latestSetMetadataEvent.metadata_uri, trx);
+        metadata = metadataRow && metadataRow.data ? metadataRow.data : null;
+        status = metadataRow ? metadataRow.status : 'unprocessed';
+      } else if (latestSetMetadataEvent.metadata) {
+        metadata = latestSetMetadataEvent.metadata;
+        status = 'processed';
       }
-    } catch (err) {
-      console.log('failed to fetch fxhash collection metadata', err);
     }
-  }
 
-  await db.transaction(async (trx) => {
+    const contractOriginationEvent = await trx
+      .select('*')
+      .from('events')
+      .where('type', '=', CONTRACT_ORIGINATION)
+      .andWhere('contract_address', '=', fa2Address)
+      .first();
+
+    const { token, listings, holders, tags, offers, royaltyReceivers } = compileToken(
+      fa2Address,
+      tokenId,
+      events,
+      status,
+      metadata,
+      contractOriginationEvent
+    );
+
+    if ([FX_CONTRACT_FA2, FX_CONTRACT_FA2_V3, FX_CONTRACT_FA2_V4].includes(token.fa2_address) && isString(token.fx_issuer_id)) {
+      // add the displayUri and the thumbnailUri of the the fxhash collection to the token
+      try {
+        // a savepoint: a failing query here must not abort the transaction the token is written in
+        await trx.transaction(async (savepoint) => {
+          const fxMintIssuerEvent = await savepoint
+            .select('*')
+            .from('events')
+            .whereIn('type', ['FX_MINT_ISSUER', 'FX_MINT_ISSUER_V2', 'FX_MINT_ISSUER_V3', 'FX_MINT_ISSUER_V4'])
+            .andWhere('issuer_id', '=', token.fx_issuer_id)
+            .first();
+
+          if (fxMintIssuerEvent && fxMintIssuerEvent.metadata_uri) {
+            const metadata = await savepoint.select('*').from('token_metadata').where('uri', '=', fxMintIssuerEvent.metadata_uri).first();
+
+            if (get(metadata, 'data.name')) {
+              token.fx_collection_name = get(metadata, 'data.name');
+            }
+
+            if (get(metadata, 'data.description')) {
+              token.fx_collection_description = get(metadata, 'data.description');
+            }
+
+            if (get(metadata, 'data.displayUri')) {
+              token.fx_collection_display_uri = cleanUri(get(metadata, 'data.displayUri'));
+            }
+
+            if (get(metadata, 'data.thumbnailUri')) {
+              token.fx_collection_thumbnail_uri = cleanUri(get(metadata, 'data.thumbnailUri'));
+            }
+
+            if (get(fxMintIssuerEvent, 'editions')) {
+              token.fx_collection_editions = get(fxMintIssuerEvent, 'editions');
+            }
+          }
+        });
+      } catch (err) {
+        console.log('failed to fetch fxhash collection metadata', err);
+      }
+    }
+
+    const compiled = { events, metadata, token, listings, holders, tags, offers, royaltyReceivers };
+
     await trx.raw('SET CONSTRAINTS ALL DEFERRED;');
 
     await trx('tags').where('fa2_address', '=', token.fa2_address).andWhere('token_id', '=', token.token_id).del().transacting(trx);
@@ -1867,7 +1877,7 @@ export async function rebuildToken(payload: RebuildTokenTaskPayload) {
 
       // delete the token if it's on an ignored contract.
       await trx('tokens').where('fa2_address', '=', token.fa2_address).andWhere('token_id', '=', token.token_id).del().transacting(trx);
-      return;
+      return compiled;
     }
 
     const tokenRow = ['teiacafe_playlist', 'formats', 'creators', 'contributors', 'attributes', 'royalties', 'lowest_price_listing'].reduce<
@@ -1939,6 +1949,8 @@ export async function rebuildToken(payload: RebuildTokenTaskPayload) {
         await trx('holdings').insert(rows).transacting(trx);
       }
     }
+
+    return compiled;
   });
 
   await triggerTokenRebuild({

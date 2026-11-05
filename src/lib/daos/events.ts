@@ -1,3 +1,4 @@
+import { Knex } from 'knex';
 import differenceBy from 'lodash/differenceBy';
 import difference from 'lodash/difference';
 import db from '../db';
@@ -40,8 +41,8 @@ export async function getMatchingEvents(events: Array<Partial<Event>>): Promise<
   return await queryBuilder;
 }
 
-export async function getTokenEvents(fa2Address: string, tokenId: string) {
-  return db(TABLE)
+export async function getTokenEvents(fa2Address: string, tokenId: string, conn: Knex = db) {
+  return conn(TABLE)
     .select('*')
     .where('fa2_address', '=', fa2Address)
     .andWhere('token_id', '=', tokenId)
