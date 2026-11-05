@@ -45,8 +45,9 @@ const TeiaSubjktRegistryHandler: TransactionHandler<TeiaSubjktRegistryEvent> = {
 
   exec: (transaction) => {
     const ownerAddress = get(transaction, 'sender.address');
-    const metadataUri = Buffer.from(get(transaction, 'parameter.value.metadata'), 'hex').toString();
-    const subjkt = Buffer.from(get(transaction, 'parameter.value.subjkt'), 'hex').toString();
+    // the registry accepts arbitrary bytes, and postgres cannot store null characters in text or jsonb
+    const metadataUri = Buffer.from(get(transaction, 'parameter.value.metadata'), 'hex').toString().replace(/\0/g, '');
+    const subjkt = Buffer.from(get(transaction, 'parameter.value.subjkt'), 'hex').toString().replace(/\0/g, '');
     const id = createEventId(EVENT_TYPE_TEIA_SUBJKT_REGISTRY, transaction);
 
     const event: TeiaSubjktRegistryEvent = {
