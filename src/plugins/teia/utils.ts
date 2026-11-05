@@ -1,6 +1,6 @@
 import isString from 'lodash/isString';
 import uniq from 'lodash/uniq';
-import createHmac from 'create-hmac';
+import { createHmac } from 'crypto';
 import isIPFS from 'is-ipfs';
 
 const SUPPORTED_IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/tiff', 'image/webp', 'image/avif'];
