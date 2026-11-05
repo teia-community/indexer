@@ -102,3 +102,91 @@ test('creates OBJKT_BUY_DUTCH_AUCTION_V2 events', async () => {
     },
   ]);
 });
+
+test('creates OBJKT_BUY_DUTCH_AUCTION_V2 events for buys that leave editions in the auction', async () => {
+  const transactions: Transactions = [
+    {
+      id: 469936675749888,
+      level: 3168842,
+      timestamp: '2023-02-22T19:45:29Z',
+      block: 'BMYs7SkDM3H1Fw94nc3xWmQWiysDeRWVfa91f7ZhWjX6jbTyd2K',
+      hash: 'opFMRKtbdzg4B5vwLzpPEbr8VoUaCzJeCHiGLg7LiTp6gnDBNss',
+      counter: 64622059,
+      sender: {
+        address: 'tz1ZvKXy6fdW7NikKCyx7DTMMzUG6iN11Ma6',
+      },
+      target: {
+        address: 'KT1XXu88HkNzQRHNgAf7Mnq68LyS9MZJNoHP',
+      },
+      amount: 407974,
+      parameter: {
+        entrypoint: 'buy',
+        value: {
+          proxy: null,
+          amount: '407974',
+          auction_id: '1008002',
+        },
+      },
+      status: 'applied',
+      hasInternals: true,
+      initiator: null,
+      nonce: null,
+      storage: {
+        paused: false,
+        big_map: 103267,
+        auctions: 103265,
+        metadata: 103266,
+        upgradable: false,
+        token_registry: 'KT1Pbj1uKjxZJLHyoQ2YUs4kukjvLJdheyfU',
+        next_auction_id: '1008004',
+        permission_module: 'KT1DF2c7VUED7W3h5BnqUKdB87Ke7XdCjQiY',
+      },
+      diffs: [
+        {
+          bigmap: 103265,
+          path: 'auctions',
+          action: 'update_key',
+          content: {
+            hash: 'exprvKGzhw8DThY2WcDotww8tLj2wn49D7HRULa6HmKe9pHtMei98Q',
+            key: '1008002',
+            value: {
+              token: {
+                address: 'KT1UV6PUBVLDtuQHX1Fbtn1nDyDSMBsKQYMm',
+                token_id: '2',
+              },
+              shares: [
+                {
+                  amount: '2500',
+                  recipient: 'tz1M5YNHNxgRc7yTyrBqVBhGLaJd2AVhzfxs',
+                },
+              ],
+              creator: 'tz1M5YNHNxgRc7yTyrBqVBhGLaJd2AVhzfxs',
+              currency: {
+                tez: {},
+              },
+              editions: '49',
+              end_time: '2023-02-22T23:25:03Z',
+              end_price: '250000',
+              start_time: '2023-02-22T17:25:03Z',
+              start_price: '500000',
+            },
+          },
+        },
+      ],
+    },
+  ];
+
+  const events = transactionsToEvents(transactions, [ObjktBuyDutchAuctionHandlerV2]);
+
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    type: 'OBJKT_BUY_DUTCH_AUCTION_V2',
+    fa2_address: 'KT1UV6PUBVLDtuQHX1Fbtn1nDyDSMBsKQYMm',
+    token_id: '2',
+    seller_address: 'tz1M5YNHNxgRc7yTyrBqVBhGLaJd2AVhzfxs',
+    buyer_address: 'tz1ZvKXy6fdW7NikKCyx7DTMMzUG6iN11Ma6',
+    price: '407974',
+    auction_id: '1008002',
+    amount: '1',
+  });
+});
