@@ -9,7 +9,9 @@ const defaultConfig = {
   rebuildPollInterval: 500,
   workerPollInterval: 500,
   startBlock: 1365000,
-  maxBlocksPerIteration: 1000,
+  maxBlocksPerIteration: process.env.MAX_BLOCKS_PER_ITERATION ? parseInt(process.env.MAX_BLOCKS_PER_ITERATION, 10) : 1000,
+  // ctrl stops enqueueing levels while this many event-producer jobs are waiting
+  maxPendingLevels: process.env.MAX_PENDING_LEVELS ? parseInt(process.env.MAX_PENDING_LEVELS, 10) : 5000,
   tzktApiUrl: process.env.TZKT_API || 'https://api.mainnet.tzkt.io/v1',
   fetchMetadataTimeout: process.env.FETCH_METADATA_TIMEOUT ? parseInt(process.env.FETCH_METADATA_TIMEOUT, 10) : 40000,
   metadataMaxFilesize: 1024 * 60, // 60kb

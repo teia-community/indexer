@@ -104,6 +104,31 @@ async function handleTimedoutOffersAndListings(max = 50) {
   }
 }
 
+let isEnqueueingLevels = false;
+
+async function countPendingLevels() {
+  const [{ count }] = await db('graphile_worker.jobs')
+    .where('task_identifier', getTaskName('event-producer'))
+    .andWhereRaw('attempts < max_attempts')
+    .count('* as count');
+
+  return parseInt(count as string, 10);
+}
+
+// one statement instead of one addJob per level: every add_job commit sends a NOTIFY, and those all
+// serialize on postgres's global notify lock, so enqueueing level by level is slow under load.
+async function enqueueLevels(from: number, to: number) {
+  await db.raw(
+    `select graphile_worker.add_job(
+       identifier => ?,
+       payload => json_build_object('filters', json_build_object('level', level)),
+       job_key => 'index-level-' || level
+     )
+     from generate_series(?::int, ?::int) as level`,
+    [getTaskName('event-producer'), from, to]
+  );
+}
+
 export async function run() {
   const connection = new HubConnectionBuilder().withUrl(`${config.tzktApiUrl}/ws`).build();
   const workerUtils = await getWorkerUtils();
@@ -118,22 +143,40 @@ export async function run() {
 
   connection.on('head', async (msg) => {
     if (msg.type === 1) {
+      // head messages keep arriving while a previous handler is still awaiting. without this guard
+      // the next one starts from the same lastBlock and enqueues the same levels a second time.
+      if (isEnqueueingLevels) {
+        return;
+      }
+
+      isEnqueueingLevels = true;
       const startBlock = lastBlock + 1;
-      const max = Math.min(startBlock + config.maxBlocksPerIteration, msg.state);
 
-      for (let i = startBlock; i <= max; i++) {
-        await workerUtils.addJob(getTaskName('event-producer'), { filters: { level: i } }, { jobKey: `index-level-${i}` });
+      try {
+        // backpressure: only top the queue up, so it cannot run far ahead of the workers
+        const room = Math.max(0, config.maxPendingLevels - (await countPendingLevels()));
+        const max = Math.min(lastBlock + Math.min(config.maxBlocksPerIteration, room), msg.state);
+
+        if (max >= startBlock) {
+          // claim the range before awaiting, so a reorg handled meanwhile can still rewind it
+          lastBlock = max;
+          await enqueueLevels(startBlock, max);
+
+          // TODO: sometimes some transactions get missed in the first run. this is a temporariy workaround.
+          await workerUtils.addJob(getTaskName('event-producer'), { filters: { level: max - 5 } }, { jobKey: `index-level-${max - 5}` });
+
+          // every 10 blocks, check for timed out offers and listings
+          if (Math.floor(max / 10) > Math.floor((startBlock - 1) / 10)) {
+            await handleTimedoutOffersAndListings();
+          }
+        }
+      } catch (err) {
+        logger.error(`failed to enqueue levels from ${startBlock}`, err);
+        // hand the range back so the next head message retries it
+        lastBlock = Math.min(lastBlock, startBlock - 1);
+      } finally {
+        isEnqueueingLevels = false;
       }
-
-      // TODO: sometimes some transactions get missed in the first run. this is a temporariy workaround.
-      await workerUtils.addJob(getTaskName('event-producer'), { filters: { level: max - 5 } }, { jobKey: `index-level-${max - 5}` });
-
-      // every 10 blocks, check for timed out offers and listings
-      if (max % 10 === 0) {
-        await handleTimedoutOffersAndListings();
-      }
-
-      lastBlock = max;
     } else if (msg.type === 2) {
       const lastValidBlock = msg.state;
       logger.info(`reorg: revert to level ${lastValidBlock}`);
