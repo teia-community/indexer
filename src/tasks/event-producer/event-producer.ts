@@ -25,7 +25,16 @@ import {
   TransactionHandler,
   OriginationHandler,
 } from '../../types';
-import { transactionMatchesPattern, getBlockQuotes, getTransactions, getOriginations, getTaskName, getWorkerPreset, isIndexedContract } from '../../lib/utils';
+import {
+  transactionMatchesPattern,
+  getBlockQuotes,
+  getTransactions,
+  getOriginations,
+  getTaskName,
+  getWorkerPreset,
+  isIndexedContract,
+  addRebuildTokenJobs,
+} from '../../lib/utils';
 import * as eventsDao from '../../lib/daos/events';
 import logger from '../../lib/logger';
 import config from '../../lib/config';
@@ -245,7 +254,11 @@ export async function produceEvents(payload: EventProducerTaskPayload) {
     return isIndexedContract((event as TokenEvent).fa2_address);
   });
 
-  if (!payload.overwriteEvents) {
+  // when a whole level is replaced, every event is written again: skipping the existing ones would let
+  // the delete below remove them
+  const overwriteLevel = !!(payload.overwriteLevel && payload.filters.level);
+
+  if (!payload.overwriteEvents && !overwriteLevel) {
     try {
       events = await eventsDao.getNotExistingEvents(events);
     } catch (err) {
@@ -255,7 +268,8 @@ export async function produceEvents(payload: EventProducerTaskPayload) {
 
   console.log(`processing ${events.length} events.`, JSON.stringify(payload.filters));
 
-  if (!events.length) {
+  // a replaced level may now have no events at all, but its old ones still have to go
+  if (!events.length && !overwriteLevel) {
     return;
   }
 
@@ -271,14 +285,23 @@ export async function produceEvents(payload: EventProducerTaskPayload) {
     ['fa2_address', 'token_id']
   ) as Array<Token>;
 
+  let replacedTokens: Array<{ fa2_address: string; token_id: string }> = [];
+
   await db.transaction(async (trx) => {
     // TODO: remove this logic here. instead, the rebuild-token should take care of it
     for (const chunkOfTokens of chunk(tokens, 50)) {
       await db('tokens').insert(chunkOfTokens).onConflict(['fa2_address', 'token_id']).ignore().transacting(trx);
     }
 
-    if (payload.overwriteLevel && payload.filters.level) {
-      await db('events').where('level', '=', payload.filters.level).del().transacting(trx);
+    if (overwriteLevel) {
+      const level = payload.filters.level as number;
+
+      replacedTokens = await db('events')
+        .distinct('fa2_address', 'token_id')
+        .where('level', '=', level)
+        .whereNotNull('token_id')
+        .transacting(trx);
+      await db('events').where('level', '=', level).del().transacting(trx);
     }
 
     for (const chunkOfEvents of chunk(events, 50)) {
@@ -292,6 +315,10 @@ export async function produceEvents(payload: EventProducerTaskPayload) {
       await db('events').insert(chunkOfEvents).onConflict('id').ignore().transacting(trx);
     }
   });
+
+  // tokens that only had events in the replaced version of the level are not in the new events, so
+  // processEvents would not rebuild them
+  await addRebuildTokenJobs(replacedTokens);
 
   await processEvents(events);
 }

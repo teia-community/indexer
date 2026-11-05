@@ -66,6 +66,37 @@ async function enqueueLevels(from: number, to: number) {
   );
 }
 
+// a job that was indexing a reverted level when the reorg arrived may still write events from the
+// abandoned branch after they were deleted above, and re-indexing only adds missing events. so each
+// reverted level is replaced once more, after such jobs have had time to finish.
+const REORG_OVERWRITE_DELAY_MS = 60 * 1000;
+// reorgs are a few levels deep at most; this only bounds the work if a message is ever unexpected
+const MAX_REORG_OVERWRITE_LEVELS = 100;
+
+async function scheduleReorgOverwrites(from: number, to: number) {
+  const first = Math.max(from, to - MAX_REORG_OVERWRITE_LEVELS + 1);
+
+  if (to < first) {
+    return;
+  }
+
+  const workerUtils = await getWorkerUtils();
+  const runAt = new Date(Date.now() + REORG_OVERWRITE_DELAY_MS);
+
+  try {
+    await workerUtils.addJobs(
+      Array.from({ length: to - first + 1 }, (_, i) => ({
+        identifier: getTaskName('event-producer'),
+        payload: { filters: { level: first + i }, overwriteLevel: true },
+        jobKey: `reorg-level-${first + i}`,
+        runAt,
+      }))
+    );
+  } catch (err) {
+    logger.error(`failed to schedule overwriting the reverted levels ${first}-${to}`, err);
+  }
+}
+
 // read through the last_level() function, which the status bot polls via hasura. failing to record it
 // must not stop indexing, so errors are only logged.
 async function recordIndexedLevel(level: number) {
@@ -133,6 +164,7 @@ export async function run() {
       }
     } else if (msg.type === 2) {
       const lastValidBlock = msg.state;
+      const revertedUpTo = lastBlock;
       logger.info(`reorg: revert to level ${lastValidBlock}`);
       const invalidEvents = await db.select('*').from('events').where('level', '>', lastValidBlock);
       await db('events').where('level', '>', lastValidBlock).del();
@@ -142,6 +174,8 @@ export async function run() {
 
       // rewind so the reverted levels get re-indexed
       lastBlock = Math.min(lastBlock, lastValidBlock);
+
+      await scheduleReorgOverwrites(lastValidBlock + 1, revertedUpTo);
     }
   });
 
