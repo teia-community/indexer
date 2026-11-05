@@ -19,7 +19,10 @@ const defaultConfig = {
   fetchMetadataTimeout: process.env.FETCH_METADATA_TIMEOUT ? parseInt(process.env.FETCH_METADATA_TIMEOUT, 10) : 40000,
   metadataMaxFilesize: 1024 * 60, // 60kb
   thumbnailWidths: [320, 640, 960],
-  allowedContractAddresses: process.env.ALLOWED_FA2_CONTRACT_ADDRESS ? [process.env.ALLOWED_FA2_CONTRACT_ADDRESS] : null,
+  // comma-separated; when set, only events for tokens of these contracts are indexed
+  allowedContractAddresses: process.env.ALLOWED_FA2_CONTRACT_ADDRESS
+    ? process.env.ALLOWED_FA2_CONTRACT_ADDRESS.split(',').map((address) => address.trim()).filter(Boolean)
+    : null,
   ignoredContractAddresses: [
     'KT1AFA2mwNUMNd4SsujE1YYp29vd8BZejyKW', // hDAO
     'KT1M81KrJr6TxYLkZkVqcpSTNKGoya8XytWT', // ECOIN NETWORK
