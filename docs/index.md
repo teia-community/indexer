@@ -1,10 +1,12 @@
 # Introduction
 
-The TezTok indexer is an open-source tool that allows developers to access NFT data across Tezos marketplaces through a GraphQL API. The indexer's goal is to align data, including sales, listings, and offers from different NFT marketplaces, making it more accessible for developers to build dApps. If you want to play around with it, we have a public instance up and running:
+The TezTok indexer is an open-source tool that allows developers to access NFT data across Tezos marketplaces through a GraphQL API. The indexer's goal is to align data, including sales, listings, and offers from different NFT marketplaces, making it more accessible for developers to build dApps.
 
-**API:** https://api.teztok.com/v1/graphql
+This fork is maintained by the [Teia](https://teia.art) community, and Teia runs a public instance:
 
-**GraphiQL Playground:** https://graphiql.teztok.com/
+**API:** https://teztok.teia.art/v1/graphql
+
+It indexes the Hic et Nunc / Teia OBJKT contract only, so the results below cover those tokens. Any GraphQL client can query it, for example GraphiQL or Altair pointed at the URL above.
 
 Here is an example GraphQL request to retrieve the total sales volume for all indexed marketplaces during March 2022:
 
