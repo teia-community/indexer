@@ -102,3 +102,46 @@ test('creates TEIA_SUBJKT_REGISTRY events', async () => {
     },
   ]);
 });
+
+test('strips null characters from the subjkt', async () => {
+  const transactions: Transactions = [
+    {
+      id: 59526468337664,
+      level: 1528954,
+      timestamp: '2021-06-24T08:22:14Z',
+      block: 'BM8rX8fZ7NBWUSHJCuNVisS93tn8MYdgFcAvu98BPHdorSWXPXR',
+      hash: 'oocGA6Hb1WBMFYucPARF7QusiWERnwQuQeQZiBAvREEhyAFgbmo',
+      counter: 16867651,
+      sender: {
+        address: 'tz1Z2eDxninkqDG6dW7cd9muvjwWjZMBKb8k',
+      },
+      target: {
+        alias: 'Hic et Nunc Name Registry',
+        address: 'KT1My1wDZHDGweCrJnQJi3wcFaS67iksirvj',
+      },
+      amount: 0,
+      parameter: {
+        entrypoint: 'registry',
+        value: {
+          subjkt: '280028002800',
+          metadata: '697066733a2f2f516d52635039346b5872357a5a6a52477669376d4a36756e374c7078556859565234523452706963787a67596b74',
+        },
+      },
+      status: 'applied',
+      hasInternals: false,
+      initiator: null,
+      nonce: null,
+    },
+  ];
+
+  const events = transactionsToEvents(transactions, [TeiaSubjktRegistry]);
+
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    owner_address: 'tz1Z2eDxninkqDG6dW7cd9muvjwWjZMBKb8k',
+    metadata_uri: 'ipfs://QmRcP94kXr5zZjRGvi7mJ6un7LpxUhYVR4R4RpicxzgYkt',
+    custom_data: {
+      subjkt: '(((',
+    },
+  });
+});
