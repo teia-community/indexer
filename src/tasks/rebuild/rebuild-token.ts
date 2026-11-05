@@ -57,6 +57,7 @@ import {
   EIGHTSCRIBO_CONTRACT_MARKETPLACE,
   KALAMINT_CONTRACT_FA2,
   TEIACAFE_FA2,
+  OBJKT_CONTRACT_OFFERS_PRE,
 } from '../../consts';
 import { isNumber } from 'lodash';
 
@@ -729,6 +730,40 @@ export function compileToken(
 
       case 'OBJKT_FULFILL_BID': {
         const offerKey = createListingKey(OBJKT_CONTRACT_MARKETPLACE, event.bid_id);
+
+        if (offerKey in offers) {
+          offers[offerKey].status = 'fulfilled';
+        }
+
+        break;
+      }
+
+      case 'OBJKT_BID_PRE': {
+        offers[createListingKey(OBJKT_CONTRACT_OFFERS_PRE, event.bid_id)] = {
+          type: 'OBJKT_BID_PRE',
+          contract_address: OBJKT_CONTRACT_OFFERS_PRE,
+          created_at: event.timestamp,
+          bid_id: event.bid_id,
+          buyer_address: event.buyer_address,
+          price: event.price,
+          status: 'active',
+        };
+
+        break;
+      }
+
+      case 'OBJKT_RETRACT_BID_PRE': {
+        const offerKey = createListingKey(OBJKT_CONTRACT_OFFERS_PRE, event.bid_id);
+
+        if (offerKey in offers) {
+          offers[offerKey].status = 'canceled';
+        }
+
+        break;
+      }
+
+      case 'OBJKT_FULFILL_BID_PRE': {
+        const offerKey = createListingKey(OBJKT_CONTRACT_OFFERS_PRE, event.bid_id);
 
         if (offerKey in offers) {
           offers[offerKey].status = 'fulfilled';

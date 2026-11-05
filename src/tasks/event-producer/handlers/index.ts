@@ -23,6 +23,9 @@ import ObjktRetractAskHandler, { ObjktRetractAskEvent } from './objkt_retract_as
 import ObjktRetractAskV2Handler, { ObjktRetractAskV2Event } from './objkt_retract_ask_v2';
 import ObjktRetractAskV3Handler, { ObjktRetractAskV3Event } from './objkt_retract_ask_v3';
 import ObjktFulfillBidHandler, { ObjktFulfillBidEvent } from './objkt_fulfill_bid';
+import ObjktBidPreHandler, { ObjktBidPreEvent } from './objkt_bid_pre';
+import ObjktRetractBidPreHandler, { ObjktRetractBidPreEvent } from './objkt_retract_bid_pre';
+import ObjktFulfillBidPreHandler, { ObjktFulfillBidPreEvent } from './objkt_fulfill_bid_pre';
 import ObjktRetractBidHandler, { ObjktRetractBidEvent } from './objkt_retract_bid';
 import ObjktRetractOfferHandler, { ObjktRetractOfferEvent } from './objkt_retract_offer';
 import ObjktRetractOfferV3Handler, { ObjktRetractOfferV3Event } from './objkt_retract_offer_v3';
@@ -124,6 +127,9 @@ export type AnyEvent =
   | ObjktRetractAskV2Event
   | ObjktRetractAskV3Event
   | ObjktFulfillBidEvent
+  | ObjktBidPreEvent
+  | ObjktRetractBidPreEvent
+  | ObjktFulfillBidPreEvent
   | ObjktFulfillOfferEvent
   | ObjktFulfillOfferV3Event
   | ObjktRetractBidEvent
@@ -222,6 +228,9 @@ export const handlers: Array<TransactionHandler<AnyEvent> | OriginationHandler<A
   ObjktFulfillAskV2Handler,
   ObjktFulfillAskV3Handler,
   ObjktFulfillBidHandler,
+  ObjktBidPreHandler,
+  ObjktRetractBidPreHandler,
+  ObjktFulfillBidPreHandler,
   ObjktFulfillOfferHandler,
   ObjktFulfillOfferV3Handler,
   ObjktMintArtistHandler,

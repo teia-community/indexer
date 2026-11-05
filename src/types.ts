@@ -2,6 +2,7 @@ import {
   HEN_CONTRACT_MARKETPLACE,
   HEN_CONTRACT_MARKETPLACE_V2,
   OBJKT_CONTRACT_MARKETPLACE,
+  OBJKT_CONTRACT_OFFERS_PRE,
   OBJKT_CONTRACT_MARKETPLACE_V2,
   OBJKT_CONTRACT_MARKETPLACE_V3,
   OBJKT_CONTRACT_MARKETPLACE_V3_PRE,
@@ -527,6 +528,12 @@ export interface ObjktBid extends Offer {
   contract_address: typeof OBJKT_CONTRACT_MARKETPLACE;
 }
 
+export interface ObjktBidPre extends Offer {
+  type: 'OBJKT_BID_PRE';
+  bid_id: string;
+  contract_address: typeof OBJKT_CONTRACT_OFFERS_PRE;
+}
+
 export interface ObjktOffer extends Offer {
   type: 'OBJKT_OFFER';
   offer_id: string;
@@ -557,7 +564,7 @@ export interface FxOfferV3 extends Offer {
   contract_address: typeof FX_CONTRACT_MARKETPLACE_V3;
 }
 
-export type AnyOffer = ObjktBid | ObjktOffer | ObjktOfferV3 | VersumOffer | FxOfferV3;
+export type AnyOffer = ObjktBid | ObjktBidPre | ObjktOffer | ObjktOfferV3 | VersumOffer | FxOfferV3;
 
 export type Holders = Record<string, number>;
 

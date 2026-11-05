@@ -3077,6 +3077,81 @@ test('handles OBJKT_RETRACT_BID events', () => {
   ]);
 });
 
+test('handles OBJKT_BID_PRE, OBJKT_RETRACT_BID_PRE and OBJKT_FULFILL_BID_PRE events', () => {
+  const preBid = (bidId: string, opid: string, buyer: string, price: string): AnyEvent => ({
+    id: `bid-pre-${bidId}`,
+    type: 'OBJKT_BID_PRE',
+    opid,
+    ophash: TEST_OPHASH,
+    timestamp: '2021-06-12T10:00:00Z',
+    level: 1511757,
+    fa2_address: TEST_FA2_ADDRESS,
+    token_id: TEST_TOKEN_ID,
+    bid_id: bidId,
+    buyer_address: buyer,
+    price,
+  });
+
+  const events: Array<AnyEvent> = [
+    preBid('76', '1', 'tz1V6YfNEZdyDstDyJRkw52F5CUidMrX1iwZ', '3000000'),
+    preBid('21', '2', 'tz1XHhjLXQuG9rf9n7o1VbgegMkiggy1oktu', '30000'),
+    preBid('22', '3', 'tz1QGCWjNpYmcS6T9qFGYSam25e36WeFUCK4', '5000000'),
+    // a bid with the same id on objkt.com's later marketplace is a different offer
+    {
+      id: 'bid-v1-22',
+      type: 'OBJKT_BID',
+      opid: '4',
+      ophash: TEST_OPHASH,
+      timestamp: '2021-06-30T23:14:02Z',
+      level: 1538313,
+      fa2_address: TEST_FA2_ADDRESS,
+      token_id: TEST_TOKEN_ID,
+      bid_id: '22',
+      buyer_address: 'tz1aWL8AMR6CH4NMdUuiLekQbQ5TPYMzvtuQ',
+      artist_address: 'tz1aWL8AMR6CH4NMdUuiLekQbQ5TPYMzvtuQ',
+      royalties: '200',
+      price: '1000000',
+    },
+    {
+      id: 'retract-pre-21',
+      type: 'OBJKT_RETRACT_BID_PRE',
+      opid: '5',
+      ophash: TEST_OPHASH,
+      timestamp: '2021-07-01T10:00:00Z',
+      level: 1539000,
+      fa2_address: TEST_FA2_ADDRESS,
+      token_id: TEST_TOKEN_ID,
+      bid_id: '21',
+      buyer_address: 'tz1XHhjLXQuG9rf9n7o1VbgegMkiggy1oktu',
+    },
+    {
+      id: 'fulfill-pre-76',
+      type: 'OBJKT_FULFILL_BID_PRE',
+      implements: 'SALE',
+      opid: '6',
+      ophash: TEST_OPHASH,
+      timestamp: '2021-07-02T10:00:00Z',
+      level: 1540000,
+      fa2_address: TEST_FA2_ADDRESS,
+      token_id: TEST_TOKEN_ID,
+      bid_id: '76',
+      price: '3000000',
+      seller_address: 'tz1doH665WG8vDcKjnRKtCTkrSiqQfSQknvQ',
+      buyer_address: 'tz1V6YfNEZdyDstDyJRkw52F5CUidMrX1iwZ',
+    },
+  ];
+
+  const { offers, token } = compileToken(TEST_FA2_ADDRESS, TEST_TOKEN_ID, events, 'unprocessed');
+  const byKey = (type: string, bidId: string) => offers.find((offer: any) => offer.type === type && offer.bid_id === bidId);
+
+  expect(offers).toHaveLength(4);
+  expect(byKey('OBJKT_BID_PRE', '76')).toMatchObject({ contract_address: 'KT1Dno3sQZwR5wUCWxzaohwuJwG3gX1VWj1Z', status: 'fulfilled' });
+  expect(byKey('OBJKT_BID_PRE', '21')).toMatchObject({ status: 'canceled' });
+  expect(byKey('OBJKT_BID_PRE', '22')).toMatchObject({ status: 'active', price: '5000000' });
+  expect(byKey('OBJKT_BID', '22')).toMatchObject({ contract_address: 'KT1FvqJwEDWb1Gwc55Jd1jjTHRVWbYKUUpyq', status: 'active' });
+  expect(token.highest_offer_price).toBe('5000000');
+});
+
 test('handles OBJKT_OFFER and OBJKT_FULFILL_OFFER events', () => {
   const events: Array<AnyEvent> = [
     {
