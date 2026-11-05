@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { downloadMetadataFromIpfsGateways, fetchMetadataFromFallback, MetadataNotFoundError } from './fetch-metadata';
+import { downloadMetadataFromIpfsGateways, fetchMetadataFromFallback, MetadataNotFoundError, MetadataTooLargeError } from './fetch-metadata';
 
 jest.mock('axios');
 
@@ -87,4 +87,28 @@ test('the fallback returns null when it has nothing, fails, or is not configured
 
   await expect(fetchMetadataFromFallback('ipfs://QmCid', '')).resolves.toBeNull();
   expect(mockedAxios.post).toHaveBeenCalledTimes(3);
+});
+
+test('stops at metadata that exceeds the size limit, without trying other gateways', async () => {
+  respondPerGateway({
+    'https://a.example/ipfs': new Error('maxContentLength size of 61440 exceeded'),
+    'https://b.example/ipfs': { name: 'token' },
+  });
+
+  mockedAxios.head.mockResolvedValue({ headers: { 'content-type': 'image/png; charset=binary', 'content-length': '3326406' } });
+
+  const result = downloadMetadataFromIpfsGateways('QmCid', ['https://a.example/ipfs', 'https://b.example/ipfs']);
+
+  await expect(result).rejects.toBeInstanceOf(MetadataTooLargeError);
+  await expect(result).rejects.toThrow('https://a.example/ipfs/QmCid exceeds the 61440 byte limit (image/png, 3326406 bytes)');
+  expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+});
+
+test('reports a size failure without the content type when the headers cannot be fetched', async () => {
+  respondPerGateway({ 'https://a.example/ipfs': new Error('maxContentLength size of 61440 exceeded') });
+  mockedAxios.head.mockRejectedValue(httpError(405));
+
+  await expect(downloadMetadataFromIpfsGateways('QmCid', ['https://a.example/ipfs'])).rejects.toThrow(
+    /^https:\/\/a\.example\/ipfs\/QmCid exceeds the 61440 byte limit$/
+  );
 });
