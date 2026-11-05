@@ -1,13 +1,27 @@
 name: build image
 
+# Changes that only touch documentation neither run the tests nor publish an
+# image. Tag pushes are never filtered by paths, so a release always builds.
 on:
   push:
     branches:
       - main
     tags:
       - 'v*'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   workflow_dispatch:
+
+# A new push to a pull request cancels the run still going for its previous
+# push. Runs on main are never cancelled, so every merged commit gets an image.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   REGISTRY: ghcr.io
