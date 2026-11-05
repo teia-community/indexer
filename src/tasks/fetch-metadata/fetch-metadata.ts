@@ -27,7 +27,28 @@ async function downloadMetadata(url: string) {
   } catch (err) {
     // the job error only carries the message (e.g. a 504), not which url or gateway failed
     logger.warn(`failed to download metadata from ${url}: ${(err as Error).message}`);
+
+    // the same content is too large on every gateway and on every attempt
+    if ((err as Error).message?.startsWith('maxContentLength')) {
+      throw new MetadataTooLargeError(`${url} exceeds the ${config.metadataMaxFilesize} byte limit${await describeContent(url)}`);
+    }
+
     throw err;
+  }
+}
+
+// axios drops the response when it aborts on size, so ask for the headers separately. usually shows
+// that the uri points at an image rather than at metadata. best effort: an empty string on failure.
+async function describeContent(url: string) {
+  try {
+    const { headers } = await axios.head(url, { timeout: config.fetchMetadataTimeout });
+    const type = headers['content-type'] ? String(headers['content-type']).split(';')[0] : null;
+    const size = headers['content-length'] ? `${headers['content-length']} bytes` : null;
+    const details = [type, size].filter(Boolean).join(', ');
+
+    return details ? ` (${details})` : '';
+  } catch (err) {
+    return '';
   }
 }
 
@@ -54,7 +75,10 @@ export async function downloadMetadataFromIpfs(ipfsCid: string, ipfsGateway: str
   return downloadMetadata(`${ipfsGateway}${ipfsGateway?.endsWith('/') ? '' : '/'}${ipfsCid}`);
 }
 
-export class MetadataNotFoundError extends Error {}
+// errors that retrying, or trying another gateway, cannot fix
+export class FinalMetadataError extends Error {}
+export class MetadataNotFoundError extends FinalMetadataError {}
+export class MetadataTooLargeError extends FinalMetadataError {}
 
 export async function downloadMetadataFromIpfsGateways(ipfsCid: string, ipfsGateways: Array<string>, archiveGateways: Array<string> = []) {
   if (!ipfsGateways.length) {
@@ -67,6 +91,10 @@ export async function downloadMetadataFromIpfsGateways(ipfsCid: string, ipfsGate
     try {
       return await downloadMetadataFromIpfs(ipfsCid, ipfsGateway);
     } catch (err) {
+      if (err instanceof FinalMetadataError) {
+        throw err;
+      }
+
       if (archiveGateways.includes(normalizeGateway(ipfsGateway)) && (err as { response?: { status?: number } }).response?.status === 404) {
         throw new MetadataNotFoundError(`${ipfsCid} is not on archive gateway ${ipfsGateway}`);
       }
@@ -158,9 +186,9 @@ export async function processMetadata(payload: FetchMetadataTaskPayload, helpers
       const recovered = await fetchMetadataFromFallback(metadataUri);
 
       if (recovered === null) {
-        if (err instanceof MetadataNotFoundError) {
+        if (err instanceof FinalMetadataError) {
           await metadataDao.update(metadataUri, 'error');
-          logger.error(`metadata not found: ${err.message}`, { metadata_uri: metadataUri });
+          logger.error(`giving up on metadata: ${err.message}`, { metadata_uri: metadataUri });
           return;
         }
 
