@@ -25,7 +25,7 @@ import TeiaSplitContractOriginationHandler, {
   TEIA_SPLIT_CONTRACT_ORIGINATION,
   TeiaSplitContractOriginationEvent,
 } from './handlers/teia_split_contract_origination';
-import { getWorkerUtils, getTaskName, addRebuildTokenJobs, getWorkerPreset } from '../../lib/utils';
+import { getWorkerUtils, getTaskName, addRebuildTokenJobs, getWorkerPreset, lockToken } from '../../lib/utils';
 import logger from '../../lib/logger';
 import { cleanUri } from '../../lib/schemas';
 import { createPreviewImageUri, extractCIDsFromMetadata } from './utils';
@@ -239,6 +239,7 @@ onTokenRebuild(async ({ token, events, metadata }) => {
   }
 
   await db.transaction(async (trx) => {
+    await lockToken(trx, token.fa2_address, token.token_id);
     await trx.raw('SET CONSTRAINTS ALL DEFERRED;');
     await trx('teia_signatures')
       .where('fa2_address', '=', token.fa2_address)

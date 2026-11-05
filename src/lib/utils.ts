@@ -6,6 +6,7 @@ import get from 'lodash/get';
 import { metrohash128 } from 'metrohash';
 import dbConfig from '../knexfile';
 import db from './db';
+import { Knex } from 'knex';
 import config from './config';
 import {
   RoyaltyShares,
@@ -54,6 +55,13 @@ export function isIndexedContract(fa2Address: string) {
   }
 
   return !ignoredContractAddresses.has(fa2Address);
+}
+
+// serializes everything that rebuilds one token. it is held until the transaction ends, so two jobs
+// for the same token cannot read, delete and insert its rows at the same time: they used to collide
+// on primary keys or deadlock, and then the job was dropped.
+export async function lockToken(trx: Knex.Transaction, fa2Address: string, tokenId: string) {
+  await trx.raw('select pg_advisory_xact_lock(hashtextextended(?, 0))', [`token:${fa2Address}:${tokenId}`]);
 }
 
 // shared graphile-worker settings for the worker processes' run() calls
