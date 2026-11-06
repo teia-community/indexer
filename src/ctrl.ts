@@ -8,12 +8,19 @@ import db from './lib/db';
 import { getTaskName } from './lib/utils';
 import { TokenEvent } from './types';
 
+// the offer and listing types whose rebuild treats an end_time in the past as the end of the offer or
+// listing. a token is only rebuilt when something happens to it, so without this an expired one keeps
+// showing as active. other types with an end_time, such as auctions waiting to be settled, must not be
+// added: they stay active after it, so they would be picked again every time.
+const EXPIRING_OFFER_TYPES = ['OBJKT_OFFER', 'OBJKT_OFFER_V3_PRE', 'OBJKT_OFFER_V3', 'OBJKT_OFFER_V3_2'];
+const EXPIRING_LISTING_TYPES = ['OBJKT_ASK_V2', 'OBJKT_ASK_V3_PRE', 'OBJKT_ASK_V3', 'OBJKT_ASK_V3_2'];
+
 async function handleTimedoutOffersAndListings(max = 50) {
   try {
     const offerResults = await db
       .select('fa2_address', 'token_id')
       .from('offers')
-      .whereIn('type', ['OBJKT_OFFER', 'OBJKT_OFFER_V3_PRE', 'OBJKT_OFFER_V3'])
+      .whereIn('type', EXPIRING_OFFER_TYPES)
       .whereNotNull('end_time')
       .where('end_time', '<', new Date())
       .where('status', '=', 'active')
@@ -23,7 +30,7 @@ async function handleTimedoutOffersAndListings(max = 50) {
     const listingResults = await db
       .select('fa2_address', 'token_id')
       .from('listings')
-      .whereIn('type', ['OBJKT_ASK_V3_PRE', 'OBJKT_ASK_V3'])
+      .whereIn('type', EXPIRING_LISTING_TYPES)
       .whereNotNull('end_time')
       .where('end_time', '<', new Date())
       .where('status', '=', 'active')
