@@ -60,13 +60,6 @@ function normalizeGateway(ipfsGateway: string) {
   return ipfsGateway.trim().replace(/\/+$/, '');
 }
 
-// gateways that hold a complete archive: a 404 from one of them means the content is gone, so the
-// remaining gateways are not tried. without this, lost content holds a worker for every gateway's
-// timeout on every attempt.
-function getIpfsArchiveGateways() {
-  return (process.env.IPFS_ARCHIVE_GATEWAY || '').split(',').map(normalizeGateway).filter(Boolean);
-}
-
 function getOnchfsGateway() {
   return process.env.ONCHFS_GATEWAY ? process.env.ONCHFS_GATEWAY.trim() : null;
 }
@@ -80,14 +73,19 @@ export class FinalMetadataError extends Error {}
 export class MetadataNotFoundError extends FinalMetadataError {}
 export class MetadataTooLargeError extends FinalMetadataError {}
 
-export async function downloadMetadataFromIpfsGateways(ipfsCid: string, ipfsGateways: Array<string>, archiveGateways: Array<string> = []) {
+// every gateway is tried in order. no single 404 is conclusive: an archive does not have content
+// that was minted moments ago yet, and an upload gateway only serves what was uploaded to it. only
+// when every gateway answers 404 is the content treated as gone; a timeout or 5xx anywhere leaves
+// it to the job's retries.
+export async function downloadMetadataFromIpfsGateways(ipfsCid: string, ipfsGateways: Array<string>) {
   if (!ipfsGateways.length) {
     throw new Error('missing ipfs gateways');
   }
 
-  for (let i = 0; ; i++) {
-    const ipfsGateway = ipfsGateways[i];
+  let lastError: unknown;
+  let allNotFound = true;
 
+  for (const ipfsGateway of ipfsGateways) {
     try {
       return await downloadMetadataFromIpfs(ipfsCid, ipfsGateway);
     } catch (err) {
@@ -95,15 +93,16 @@ export async function downloadMetadataFromIpfsGateways(ipfsCid: string, ipfsGate
         throw err;
       }
 
-      if (archiveGateways.includes(normalizeGateway(ipfsGateway)) && (err as { response?: { status?: number } }).response?.status === 404) {
-        throw new MetadataNotFoundError(`${ipfsCid} is not on archive gateway ${ipfsGateway}`);
-      }
-
-      if (i === ipfsGateways.length - 1) {
-        throw err;
-      }
+      lastError = err;
+      allNotFound = allNotFound && (err as { response?: { status?: number } }).response?.status === 404;
     }
   }
+
+  if (allNotFound) {
+    throw new MetadataNotFoundError(`${ipfsCid} is not on any gateway (404 from ${ipfsGateways.map(normalizeGateway).join(', ')})`);
+  }
+
+  throw lastError;
 }
 
 // asks another teztok instance for metadata that no longer downloads. content that was only pinned on
@@ -143,9 +142,22 @@ export function validateMetadata(metadata: MetadataBase) {
   }
 }
 
+// the tokens are rebuilt so that their metadata_status shows the failure; without it they stay
+// 'unprocessed' for good, indistinguishable from metadata that is still being fetched.
+async function markMetadataFailed(metadataUri: string) {
+  await metadataDao.update(metadataUri, 'error');
+
+  const tokens = await tokensDao.getByField('metadata_uri', metadataUri);
+
+  if (tokens && tokens.length) {
+    await addRebuildTokenJobs(tokens);
+  }
+}
+
 export async function processMetadata(payload: FetchMetadataTaskPayload, helpers?: JobHelpers) {
   let metadataUri = payload.metadata_uri;
   const ipfsGateways = getIpfsGateways();
+  let stored = false;
 
   try {
     if (metadataUri.toLowerCase().startsWith('https://ipfs.io/ipfs/')) {
@@ -161,7 +173,7 @@ export async function processMetadata(payload: FetchMetadataTaskPayload, helpers
           throw new Error('missing ipfs gateways');
         }
 
-        metadata = await downloadMetadataFromIpfsGateways(metadataUri.substr(7), ipfsGateways, getIpfsArchiveGateways());
+        metadata = await downloadMetadataFromIpfsGateways(metadataUri.substr(7), ipfsGateways);
       } else if (metadataUriLowerCased.startsWith('onchfs://')) {
         const onchfsGateway = getOnchfsGateway();
 
@@ -178,7 +190,7 @@ export async function processMetadata(payload: FetchMetadataTaskPayload, helpers
         metadata = await downloadMetadata(metadataUri);
       } else {
         // unsupported format
-        await metadataDao.update(metadataUri, 'error');
+        await markMetadataFailed(metadataUri);
         logger.error(`unsupported metadata uri: ${metadataUri}`);
         return;
       }
@@ -187,7 +199,7 @@ export async function processMetadata(payload: FetchMetadataTaskPayload, helpers
 
       if (recovered === null) {
         if (err instanceof FinalMetadataError) {
-          await metadataDao.update(metadataUri, 'error');
+          await markMetadataFailed(metadataUri);
           logger.error(`giving up on metadata: ${err.message}`, { metadata_uri: metadataUri });
           return;
         }
@@ -195,39 +207,53 @@ export async function processMetadata(payload: FetchMetadataTaskPayload, helpers
         throw err;
       }
 
-      logger.info(`recovered metadata from the fallback after the download failed: ${(err as Error).message}`, { metadata_uri: metadataUri });
+      logger.info(`recovered metadata from the fallback after the download failed: ${(err as Error).message}`, {
+        metadata_uri: metadataUri,
+      });
       metadata = recovered;
     }
 
     try {
       validateMetadata(metadata);
     } catch (err) {
-      await metadataDao.update(metadataUri, 'error'); // TODO: change to 'invalid_metadata'?
+      await markMetadataFailed(metadataUri); // TODO: change to 'invalid_metadata'?
       logger.error(`invalid metadata, error: ${(err as Error).message}`, { metadata_uri: metadataUri });
       return;
     }
 
     await metadataDao.update(metadataUri, 'processed', metadata);
-
-    await triggerMetadataFetched(metadataUri, metadata);
+    stored = true;
 
     const tokens = await tokensDao.getByField('metadata_uri', metadataUri);
 
     if (tokens && tokens.length) {
       await addRebuildTokenJobs(tokens);
     }
+
+    // listeners such as pinning can fail after the metadata is stored and the tokens are queued. the
+    // job is retried so they run again, but the stored metadata is not marked as an error when the
+    // retries run out.
+    await triggerMetadataFetched(metadataUri, metadata);
   } catch (err) {
     const errMessage = (err as Error).message;
 
+    if (stored) {
+      if (helpers && helpers.job.max_attempts === helpers.job.attempts) {
+        logger.error(`metadata stored, but processing it failed, max attempts reached: ${errMessage}`, { metadata_uri: metadataUri });
+      }
+
+      throw err;
+    }
+
     if (errMessage === 'The user aborted a request.' || errMessage === 'invalid metadata') {
       logger.error(`failed to fetch metadata: ${errMessage}`, { metadata_uri: metadataUri });
-      await metadataDao.update(metadataUri, 'error');
+      await markMetadataFailed(metadataUri);
       return;
     }
 
     if (helpers && helpers.job.max_attempts === helpers.job.attempts) {
       logger.error(`failed to fetch metadata, max attempts reached: ${errMessage}`, { metadata_uri: metadataUri });
-      await metadataDao.update(metadataUri, 'error');
+      await markMetadataFailed(metadataUri);
     }
 
     throw err;
