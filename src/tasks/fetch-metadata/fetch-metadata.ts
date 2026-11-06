@@ -134,6 +134,12 @@ export async function fetchMetadataFromFallback(metadataUri: string, endpoint = 
 }
 
 export function validateMetadata(metadata: MetadataBase) {
+  // axios hands back the raw text when a response does not parse as json: an image, an svg, or json
+  // with a syntax error. postgres would refuse to store it, and every retry gets the same content.
+  if (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata)) {
+    throw new Error(`metadata is not a json object (got ${Array.isArray(metadata) ? 'an array' : typeof metadata})`);
+  }
+
   const metadataStr = JSON.stringify(metadata);
   const size = metadataStr.length;
 
