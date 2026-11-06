@@ -3,6 +3,7 @@ import {
   downloadMetadataFromIpfsGateways,
   fetchMetadataFromFallback,
   processMetadata,
+  validateMetadata,
   MetadataNotFoundError,
   MetadataTooLargeError,
 } from './fetch-metadata';
@@ -162,5 +163,28 @@ describe('processMetadata', () => {
     expect(metadataDao.update).toHaveBeenCalledTimes(1);
     expect(metadataDao.update).toHaveBeenCalledWith('ipfs://QmCid', 'processed', { name: 'token' });
     expect(addRebuildTokenJobs).toHaveBeenCalledWith([token]);
+  });
+});
+
+describe('validateMetadata', () => {
+  test('rejects content that did not parse as a json object', () => {
+    expect(() => validateMetadata('<svg xmlns="http://www.w3.org/2000/svg"></svg>' as any)).toThrow(
+      'metadata is not a json object (got string)'
+    );
+    expect(() => validateMetadata(['a'] as any)).toThrow('metadata is not a json object (got an array)');
+    expect(() => validateMetadata(null as any)).toThrow('metadata is not a json object (got object)');
+    expect(() => validateMetadata({ name: 'token' } as any)).not.toThrow();
+  });
+
+  test('gives up on non-json metadata at once and rebuilds its tokens', async () => {
+    process.env.IPFS_GATEWAY = 'https://a.example/ipfs';
+    (tokensDao.getByField as jest.Mock).mockResolvedValue([{ fa2_address: 'KT1RJ6PbjHpwc3M5rw5s2Nbmefwbuwbdxton', token_id: '1' }]);
+    respondPerGateway({ 'https://a.example/ipfs': '{ "name": "trailing comma", }' as any });
+
+    await processMetadata({ metadata_uri: 'ipfs://QmCid' });
+
+    expect(metadataDao.update).toHaveBeenCalledTimes(1);
+    expect(metadataDao.update).toHaveBeenCalledWith('ipfs://QmCid', 'error');
+    expect(addRebuildTokenJobs).toHaveBeenCalled();
   });
 });
