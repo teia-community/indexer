@@ -37,6 +37,12 @@ export PGPASSWORD="$POSTGRES_PASSWORD"
 export AWS_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:-}"
 export AWS_SECRET_ACCESS_KEY="${S3_SECRET_ACCESS_KEY:-}"
 export AWS_DEFAULT_REGION="$S3_REGION"
+# Recent AWS CLI versions add a CRC checksum to every upload by default. S3-compatible
+# servers that do not support it reject multipart uploads ("invalid/unknown checksum
+# sent"), which is every dump above the multipart threshold. Only send checksums
+# where the API requires them. Either can still be overridden from the environment.
+export AWS_REQUEST_CHECKSUM_CALCULATION="${AWS_REQUEST_CHECKSUM_CALCULATION:-when_required}"
+export AWS_RESPONSE_CHECKSUM_VALIDATION="${AWS_RESPONSE_CHECKSUM_VALIDATION:-when_required}"
 
 AWS_ARGS=()
 [ -n "$S3_ENDPOINT" ] && AWS_ARGS=(--endpoint-url "$S3_ENDPOINT")
