@@ -1,4 +1,4 @@
-import { createPreviewImageUri, extractCIDsFromMetadata } from './utils';
+import { createPreviewImageUri, extractCIDsFromMetadata, hasMediaUri } from './utils';
 
 test('creates signed preview thumbnail uris', async () => {
   expect(
@@ -98,4 +98,12 @@ test('extracts all CIDs from a metadata json', async () => {
     'QmZmAyAQcX8HMooJDf1VHfftti2MLFq8h3vyW4uGW4UVRa',
     'QmNrhZHUaEqxhyLfqoq1mtHSipkWHeT31LNHb1QEbDHgnc',
   ]);
+});
+
+test('metadata without any media uri has nothing to preview', () => {
+  // a SUBJKT profile: description and identicon only
+  expect(hasMediaUri(null, null, null)).toBe(false);
+  expect(hasMediaUri(null, 'ipfs://QmArtifact', null)).toBe(true);
+  expect(hasMediaUri('ipfs://QmDisplay', null, null)).toBe(true);
+  expect(hasMediaUri(null, null, 'ipfs://QmThumb')).toBe(true);
 });

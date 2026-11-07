@@ -26,6 +26,11 @@ const sign = (input: string, salt: string, secret: string) => {
   return urlSafeBase64(hmac.digest());
 };
 
+// profile (SUBJKT) metadata and other documents that describe no media at all: no preview to make
+export function hasMediaUri(displayUri: string | null, artifactUri: string | null, thumbnailUri: string | null) {
+  return Boolean(displayUri || artifactUri || thumbnailUri);
+}
+
 export function createPreviewImageUri(
   displayUri: string | null,
   artifactUri: string | null,

@@ -28,7 +28,7 @@ import TeiaSplitContractOriginationHandler, {
 import { getWorkerUtils, getTaskName, addRebuildTokenJobs, getWorkerPreset, lockToken } from '../../lib/utils';
 import logger from '../../lib/logger';
 import { cleanUri } from '../../lib/schemas';
-import { createPreviewImageUri, extractCIDsFromMetadata } from './utils';
+import { createPreviewImageUri, extractCIDsFromMetadata, hasMediaUri } from './utils';
 import db from '../../lib/db';
 import { Task } from '../../types';
 
@@ -310,6 +310,10 @@ onMetadataFetched(async (metadataUri, metadata) => {
   const artifactUri = cleanUri(get(metadata, 'artifactUri'));
   const thumbnailUri = cleanUri(get(metadata, 'thumbnailUri'));
   const mimeType = get(metadata, 'formats.0.mimeType', null);
+
+  if (!hasMediaUri(displayUri, artifactUri, thumbnailUri)) {
+    return;
+  }
 
   try {
     const previewUri = createPreviewImageUri(
