@@ -5,6 +5,12 @@ import { Processor, MetadataEvent } from '../../../types';
 import { getWorkerUtils, getTaskName, sortedUniqueJobSpecs } from '../../../lib/utils';
 import * as metadataDao from '../../../lib/daos/metadata';
 
+// graphile-worker waits exp(attempt) seconds before each retry. 10 attempts spread the retries over
+// about 3.5 hours, 6 over only 4 minutes: freshly minted content that only a slow gateway has (pinata,
+// before it is pinned anywhere else) would otherwise fail for good during a few slow minutes. content
+// that is gone everywhere still fails at once, because all gateways answering 404 is final.
+export const FETCH_METADATA_MAX_ATTEMPTS = 10;
+
 const MetadataProcessor: Processor = {
   accept: (event) => isString(get(event, 'metadata_uri')),
 
@@ -33,7 +39,7 @@ const MetadataProcessor: Processor = {
             identifier: getTaskName('fetch-metadata'),
             payload: { metadata_uri: uri },
             jobKey: `resolve-metadata-${uri.substring(0, 400)}`,
-            maxAttempts: 6,
+            maxAttempts: FETCH_METADATA_MAX_ATTEMPTS,
           }))
         )
       );
